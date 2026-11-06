@@ -106,19 +106,21 @@ export async function finishTransfer(id,history){
 export async function activateTransfer(id){await editLocal(list=>{const f=list.find(x=>x.id===id);if(!f?.transfer.complete)throw new Error('Local copy is incomplete.');f.status='ready';delete f.transfer;f.busy=null;f.busyUntil=0;});}
 export async function deleteLocal(id){await editLocal(list=>{const i=list.findIndex(f=>f.id===id);if(i>=0)list.splice(i,1);});}
 
-export async function initiativeLocal(id){
- const now=Date.now(),token=crypto.randomUUID();let f,plan;
+export async function initiativeLocal(id,entered=false){
+ const now=Date.now(),token=crypto.randomUUID();let f,plan,retry=false;
  await editLocal(list=>{
-  const current=list.find(x=>x.id===id&&x.status==='ready');if(!current||current.busyUntil>now)return;
-  const state=current.companionState||{};plan=planInitiative(current,state,now,random);
+  const current=list.find(x=>x.id===id&&x.status==='ready');if(!current)return;if(current.busyUntil>now){retry=true;return;}
+  const state=current.companionState||{};plan=planInitiative(current,state,now,random,entered);
   if(!plan){state.last_visit=now;current.companionState=state;return;}
   current.companionState={...state,...plan};if(plan.kind==='quiet')return;
   current.busy=token;current.busyUntil=now+30000;f=structuredClone(current);
  });
- if(!f)return {events:[]};
+ if(!f)return {events:[],retry};
  let spoken=fallbackInitiative(f,plan),mood=welcomeMood(f,plan);
  try{
   try{
+   // Arrival is immediate; later spontaneous moments use AI without delaying hello.
+   if(plan.arrival)throw new Error('Immediate welcome');
    const r=await ai([{role:'system',content:initiativeRules+' '+moodRules+' Return speech (empty for thought-only), thought (empty if speaking), and mood.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['speech','thought','mood'],additionalProperties:false});
    const v=JSON.parse(r.content);const value=plan.kind==='thought'?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
    spoken=plan.kind==='thought'?{speech:'',thought:text.slice(0,140)}:{speech:text.slice(0,300),thought:''};mood=assessMood(f,v.mood,'',attitudeOf(f));

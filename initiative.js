@@ -6,16 +6,16 @@ export function companionEagerness(f,now=Date.now()){
  const hurt=m.feeling==='enraged'?m.intensity*.65:m.feeling==='sad'?m.intensity*.30:0;
  return initiativeClamp(.82+a.warmth*.16+a.trust*.24+a.energy*.09+a.curiosity*.10-hurt,.04,.98);
 }
-export function planInitiative(f,state={},now=Date.now(),random=Math.random){
- const arrival=!state.last_visit||now-state.last_visit>120000;
+export function planInitiative(f,state={},now=Date.now(),random=Math.random,entered=false){
+ const arrival=(!state.last_visit||now-state.last_visit>120000||entered)&&(!state.last_greet||now-state.last_greet>60000);
  if(!arrival&&(state.next_at||0)>now)return null;
  const eagerness=companionEagerness(f,now),unanswered=arrival?0:Number(state.unanswered)||0;
  let kind;
- if(arrival)kind=random()<eagerness?'greeting':random()<.65?'thought':'quiet';
+ if(arrival)kind=eagerness>=.55||random()<eagerness?'greeting':'thought';
  else kind=unanswered<2&&random()<eagerness*.55?'speech':random()<.85?'thought':'quiet';
  // Less eager souls and unanswered invitations get more breathing room.
  const delay=arrival?55000+random()*35000:65000+random()*65000+(1-eagerness)*100000+unanswered*25000;
- return {kind,arrival,eagerness,next_at:now+Math.round(delay),last_visit:now,unanswered:unanswered+(['greeting','speech'].includes(kind)?1:0)};
+ return {kind,arrival,eagerness,last_greet:arrival?now:state.last_greet||0,next_at:now+Math.round(delay),last_visit:now,unanswered:unanswered+(['greeting','speech'].includes(kind)?1:0)};
 }
 export function welcomeMood(f,plan,now=Date.now()){
  const m={...currentMood(f,now),updated_at:now};

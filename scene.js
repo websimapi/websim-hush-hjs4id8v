@@ -47,7 +47,7 @@ export function createWorld(host,{onSelect,onHover,onContext}){
  scene.add(new THREE.HemisphereLight('#fffafd','#b1a2bd',2.4));
  const sun=new THREE.DirectionalLight('#fff5ed',3.5);sun.position.set(-3,5,5);scene.add(sun);
  const rim=new THREE.DirectionalLight('#e9dcff',2);rim.position.set(3,1,-3);scene.add(rim);
- const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!low;controls.dampingFactor=.065;controls.enablePan=true;controls.minDistance=2.8;controls.maxDistance=65;controls.maxPolarAngle=Math.PI*.64;controls.minPolarAngle=Math.PI*.22;controls.target.set(0,.25,0);controls.rotateSpeed=.4;controls.panSpeed=.5;controls.zoomSpeed=.55;
+ const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!low;controls.dampingFactor=.065;controls.enablePan=true;controls.minDistance=2.8;controls.maxDistance=65;controls.maxPolarAngle=Math.PI*.64;controls.minPolarAngle=Math.PI*.06;controls.target.set(0,.25,0);controls.rotateSpeed=.4;controls.panSpeed=.5;controls.zoomSpeed=.55;
  const effectTime={value:0};
  const fairies=new Map(),hits=[],frames=new Map();let selectedId=null,ownId=null,focus=null,lastRender=0,dirty=true,hovered=null,framed=false,followId=null,followPrevious=null;
  let titleView=false,titleIds=[];
@@ -115,8 +115,8 @@ export function createWorld(host,{onSelect,onHover,onContext}){
  function home(immediate=false,targetId=null){
   const f=fairies.get(targetId)||fairies.get(ownId)||fairies.get('preview')||fairies.values().next().value;if(!f)return;
   const target=f.group.position.clone().add(new THREE.Vector3(0,.25,0));
-  const distance=innerWidth<700?10.5:7.7;
-  const position=target.clone().add(new THREE.Vector3(0,.65,distance));
+  const distance=innerWidth<700?18.5:14.5;
+  const position=target.clone().add(new THREE.Vector3(0,distance*.95,distance*.30));
   if(immediate||low){controls.target.copy(target);camera.position.copy(position);controls.update();}else focus={target,position};
   dirty=true;
  }
@@ -142,7 +142,9 @@ export function createWorld(host,{onSelect,onHover,onContext}){
  controls.addEventListener('change',()=>{dirty=true;});
  function project(id,above=1.2){
   const f=fairies.get(id);if(!f)return null;
-  const p=f.group.position.clone().add(new THREE.Vector3(0,above*f.data.appearance.bodyScale,0)).project(camera);
+  // Screen-up anchoring remains above the body even from an overhead camera.
+  const up=new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);
+  const p=f.group.position.clone().addScaledVector(up,above*f.data.appearance.bodyScale).project(camera);
   return {x:(p.x*.5+.5)*innerWidth,y:(-.5*p.y+.5)*innerHeight,visible:p.z<1&&p.z>-1&&Math.abs(p.x)<1.2&&Math.abs(p.y)<1.3,distance:camera.position.distanceTo(f.group.position)};
  }
  let anchorCallback=()=>{};

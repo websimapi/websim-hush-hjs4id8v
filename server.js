@@ -25,6 +25,7 @@ CREATE INDEX IF NOT EXISTS wild_events_partner ON wild_events(partner_id);
 CREATE TABLE IF NOT EXISTS fairy_attitudes(user_id TEXT PRIMARY KEY,fairy_id TEXT NOT NULL,warmth REAL NOT NULL,trust REAL NOT NULL,energy REAL NOT NULL,curiosity REAL NOT NULL,updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS fairy_transfer_receipts(token TEXT PRIMARY KEY,user_id TEXT NOT NULL,fairy_id TEXT NOT NULL,committed_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS fairy_transfer_receipts_owner ON fairy_transfer_receipts(user_id);
+CREATE TABLE IF NOT EXISTS fairy_companion_welcomes(user_id TEXT PRIMARY KEY,fairy_id TEXT NOT NULL,last_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS fairy_companion_state(user_id TEXT PRIMARY KEY,fairy_id TEXT NOT NULL,last_visit INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,unanswered INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS fairy_moods(user_id TEXT PRIMARY KEY,fairy_id TEXT NOT NULL,feeling TEXT NOT NULL,intensity REAL NOT NULL,updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS fairy_transfers(user_id TEXT PRIMARY KEY,fairy_id TEXT NOT NULL,token TEXT NOT NULL,expires INTEGER NOT NULL,committed INTEGER NOT NULL DEFAULT 0);
@@ -128,7 +129,7 @@ export default {
    }
    if(!uid) return json({error:'Sign in to Websim to have a fairy of your own.'},401);
    if(path.startsWith('/api/transfer/'))return await transferRoute(request,env,uid,url);
-   if(path==='/api/companion/pulse'&&method==='POST')return await companionPulse(env,uid);
+   if(path==='/api/companion/pulse'&&method==='POST')return await companionPulse(request,env,uid);
    if(path==='/api/wild/encounter'&&method==='POST') return await encounter(env,uid);
    if(path.startsWith('/api/admin')) {
     if(!admin) return json({error:'Only the page creator may open the keeper’s panel.'},403);
@@ -144,7 +145,7 @@ export default {
     if(path==='/api/admin/read'&&method==='POST') return json({fairy:privateFairy(f),user_id:f.user_id,history:await history(env,f.user_id,f.id)});
     if(path==='/api/admin/reset'&&method==='POST') {
      if(b.confirm!=='RESET') return json({error:'Type RESET to confirm.'},400);
-     await env.DB.batch([env.DB.prepare(`DELETE FROM fairy_companion_state WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_moods WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_attitudes WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_transfers WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM wild_visitors WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM wild_events WHERE user_id=? OR partner_id=?`).bind(b.user_id,f.id),env.DB.prepare(`DELETE FROM fairy_messages WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairies WHERE user_id=?`).bind(b.user_id)]);
+     await env.DB.batch([env.DB.prepare(`DELETE FROM fairy_companion_welcomes WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_companion_state WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_moods WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_attitudes WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairy_transfers WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM wild_visitors WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM wild_events WHERE user_id=? OR partner_id=?`).bind(b.user_id,f.id),env.DB.prepare(`DELETE FROM fairy_messages WHERE user_id=?`).bind(b.user_id),env.DB.prepare(`DELETE FROM fairies WHERE user_id=?`).bind(b.user_id)]);
      return json({ok:true});
     }
     if(path==='/api/admin/save'&&method==='POST') {
@@ -164,7 +165,7 @@ export default {
    if(path==='/api/fairy'&&method==='DELETE') {
     if(await env.DB.prepare('SELECT 1 FROM fairy_transfers WHERE user_id=? AND committed=0 AND expires>?').bind(uid,Date.now()).first())return json({error:'Finish or cancel the pending offline move first.'},409);
     const b=await request.json();if(b.confirm!=='DELETE') return json({error:'Type DELETE to confirm permanent deletion.'},400);
-    await env.DB.batch([env.DB.prepare(`DELETE FROM fairy_companion_state WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_moods WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_attitudes WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_transfers WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM wild_visitors WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM wild_events WHERE user_id=? OR partner_id=(SELECT id FROM fairies WHERE user_id=?)`).bind(uid,uid),env.DB.prepare(`DELETE FROM fairy_messages WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairies WHERE user_id=?`).bind(uid)]);
+    await env.DB.batch([env.DB.prepare(`DELETE FROM fairy_companion_welcomes WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_companion_state WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_moods WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_attitudes WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairy_transfers WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM wild_visitors WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM wild_events WHERE user_id=? OR partner_id=(SELECT id FROM fairies WHERE user_id=?)`).bind(uid,uid),env.DB.prepare(`DELETE FROM fairy_messages WHERE user_id=?`).bind(uid),env.DB.prepare(`DELETE FROM fairies WHERE user_id=?`).bind(uid)]);
     return json({ok:true});
    }
    if(path==='/api/chat'&&method==='POST') {
@@ -461,6 +462,7 @@ async function transferRoute(request,env,uid,url){
    env.DB.prepare('DELETE FROM wild_visitors WHERE user_id=? AND fairy_id=? AND '+guard).bind(uid,id,uid,b.token),
    env.DB.prepare('DELETE FROM wild_events WHERE (fairy_id=? OR partner_id=?) AND '+guard).bind(id,id,uid,b.token),
    env.DB.prepare('DELETE FROM fairy_messages WHERE user_id=? AND fairy_id=? AND '+guard).bind(uid,id,uid,b.token),
+   env.DB.prepare('DELETE FROM fairy_companion_welcomes WHERE user_id=? AND fairy_id=? AND '+guard).bind(uid,id,uid,b.token),
    env.DB.prepare('DELETE FROM fairy_companion_state WHERE user_id=? AND fairy_id=? AND '+guard).bind(uid,id,uid,b.token),
    env.DB.prepare('DELETE FROM fairy_moods WHERE user_id=? AND fairy_id=? AND '+guard).bind(uid,id,uid,b.token),
    env.DB.prepare('DELETE FROM fairy_attitudes WHERE user_id=? AND fairy_id=? AND '+guard).bind(uid,id,uid,b.token),
@@ -576,16 +578,16 @@ function companionEagerness(f,now=Date.now()){
  const hurt=m.feeling==='enraged'?m.intensity*.65:m.feeling==='sad'?m.intensity*.30:0;
  return initiativeClamp(.82+a.warmth*.16+a.trust*.24+a.energy*.09+a.curiosity*.10-hurt,.04,.98);
 }
-function planInitiative(f,state={},now=Date.now(),random=Math.random){
- const arrival=!state.last_visit||now-state.last_visit>120000;
+function planInitiative(f,state={},now=Date.now(),random=Math.random,entered=false){
+ const arrival=(!state.last_visit||now-state.last_visit>120000||entered)&&(!state.last_greet||now-state.last_greet>60000);
  if(!arrival&&(state.next_at||0)>now)return null;
  const eagerness=companionEagerness(f,now),unanswered=arrival?0:Number(state.unanswered)||0;
  let kind;
- if(arrival)kind=random()<eagerness?'greeting':random()<.65?'thought':'quiet';
+ if(arrival)kind=eagerness>=.55||random()<eagerness?'greeting':'thought';
  else kind=unanswered<2&&random()<eagerness*.55?'speech':random()<.85?'thought':'quiet';
  // Less eager souls and unanswered invitations get more breathing room.
  const delay=arrival?55000+random()*35000:65000+random()*65000+(1-eagerness)*100000+unanswered*25000;
- return {kind,arrival,eagerness,next_at:now+Math.round(delay),last_visit:now,unanswered:unanswered+(['greeting','speech'].includes(kind)?1:0)};
+ return {kind,arrival,eagerness,last_greet:arrival?now:state.last_greet||0,next_at:now+Math.round(delay),last_visit:now,unanswered:unanswered+(['greeting','speech'].includes(kind)?1:0)};
 }
 function welcomeMood(f,plan,now=Date.now()){
  const m={...currentMood(f,now),updated_at:now};
@@ -599,35 +601,40 @@ function fallbackInitiative(f,plan,random=Math.random){
  return {speech:plan.kind==='greeting'?(reserved?pick(['Hello. Could we take things softly today?','You are here. I would like a quiet moment together.']):pick(['There you are! What has been on your mind?','Oh, hello! I was hoping we could talk.','You are here! Shall we share a little of the quiet?'])):pick(['What has caught your curiosity today?','Would you like to tell me a little about your day?','I wonder what you would like to explore together.']),thought:''};
 }
 
-async function companionPulse(env,uid){
- const now=Date.now();
- // Only the owning companion, actually present in the world, can wake this private behavior.
- if(!await env.DB.prepare('SELECT 1 FROM wild_visitors WHERE user_id=? AND expires>? LIMIT 1').bind(uid,now).first())return json({idle:true});
- const f=await readOwned(env,uid);if(!f||f.status!=='ready'||f.chat_until>now)return json({idle:true});
+
+async function companionPulse(request,env,uid){
+ const now=Date.now(),body=await request.json().catch(()=>({}));
+ // This authenticated in-game heartbeat also works if the social socket is reconnecting.
+ // It never creates public/social presence or exposes private events to anyone else.
+ const f=await readOwned(env,uid);if(!f||f.status!=='ready'||f.chat_until>now)return json({idle:true,retry:true});
  await env.DB.prepare('INSERT INTO fairy_companion_state(user_id,fairy_id) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,last_visit=0,next_at=0,unanswered=0 WHERE fairy_companion_state.fairy_id!=excluded.fairy_id').bind(uid,f.id).run();
  const state=await env.DB.prepare('SELECT * FROM fairy_companion_state WHERE user_id=?').bind(uid).first();
- const plan=planInitiative(f,state,now,rand);
+ const welcome=await env.DB.prepare('SELECT last_at FROM fairy_companion_welcomes WHERE user_id=? AND fairy_id=?').bind(uid,f.id).first();
+ state.last_greet=welcome?.last_at||0;
+ const plan=planInitiative(f,state,now,rand,body.entered===true);
  if(!plan){await env.DB.prepare('UPDATE fairy_companion_state SET last_visit=? WHERE user_id=? AND fairy_id=?').bind(now,uid,f.id).run();return json({idle:true});}
  const token=crypto.randomUUID();
  const lock=await env.DB.prepare('UPDATE fairies SET chat_token=?,chat_until=? WHERE user_id=? AND id=? AND chat_until<?').bind(token,now+60000,uid,f.id,now).run();
- if(!lock.meta.changes)return json({idle:true});
+ if(!lock.meta.changes)return json({idle:true,retry:true});
  try{
   const claim=await env.DB.prepare('UPDATE fairy_companion_state SET last_visit=?,next_at=?,unanswered=? WHERE user_id=? AND fairy_id=? AND next_at=?').bind(now,plan.next_at,plan.unanswered,uid,f.id,state.next_at).run();
   if(!claim.meta.changes||plan.kind==='quiet')return json({idle:true});
+  if(plan.arrival)await env.DB.prepare('INSERT INTO fairy_companion_welcomes(user_id,fairy_id,last_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,last_at=excluded.last_at').bind(uid,f.id,now).run();
   let spoken=fallbackInitiative(f,plan,rand),mood=welcomeMood(f,plan);
   try{
+   if(plan.arrival)throw new Error('Immediate welcome');
    const recent=await history(env,uid,f.id);
    const {content}=await env.AI.chat({messages:[{role:'system',content:initiativeRules+' Return exactly three labelled lines: SPEECH: one sentence (empty for a thought-only moment). THOUGHT: one short fictional feeling (empty when speaking). MOOD: calm, happy, excited, sad, or enraged followed by intensity 0 to 1. Choose your own mood, not a commanded color. Do not force happiness if hurt or angry.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent})}]});
    const v=parseVoice(content,['SPEECH','THOUGHT','MOOD']),text=clean(plan.kind==='thought'?v.THOUGHT:v.SPEECH,plan.kind==='thought'?140:300).trim();
    if(text){spoken=plan.kind==='thought'?{speech:'',thought:text}:{speech:text,thought:''};mood=assessMood(f,v.MOOD,'',attitudeOf(f));}
-  }catch(e){console.log('Companion moment used a local phrase:',e.message);}
+  }catch(e){if(!plan.arrival)console.log('Companion moment used a local phrase:',e.message);}
   const at=Date.now(),kind=spoken.speech?'speech':'thought',text=spoken.speech||spoken.thought;
-  const guard="EXISTS(SELECT 1 FROM fairies WHERE user_id=? AND id=? AND chat_token=?) AND EXISTS(SELECT 1 FROM wild_visitors WHERE user_id=? AND expires>?)";
-  const args=[uid,f.id,token,uid,at];
+  const guard="EXISTS(SELECT 1 FROM fairies WHERE user_id=? AND id=? AND chat_token=?) AND EXISTS(SELECT 1 FROM fairy_companion_state WHERE user_id=? AND last_visit>?)";
+  const args=[uid,f.id,token,uid,at-45000];
   const statements=[env.DB.prepare('INSERT INTO wild_events(user_id,fairy_id,kind,text,audience,at,expires) SELECT ?,?,?,?,\'private\',?,? WHERE '+guard).bind(uid,f.id,kind,text,at,at+(spoken.speech?22000:10000),...args)];
   if(spoken.speech){
    statements.push(env.DB.prepare("INSERT INTO fairy_messages(user_id,fairy_id,role,content,created_at) SELECT ?,?,'assistant',?,? WHERE "+guard).bind(uid,f.id,spoken.speech,at,...args));
-   statements.push(env.DB.prepare('UPDATE fairies SET memory_md=? WHERE user_id=? AND id=? AND chat_token=? AND EXISTS(SELECT 1 FROM wild_visitors WHERE user_id=? AND expires>?)').bind((f.memory_md+'\n\n## A moment with my companion\nI said: '+spoken.speech).slice(-48000),uid,f.id,token,uid,at));
+   statements.push(env.DB.prepare('UPDATE fairies SET memory_md=? WHERE user_id=? AND id=? AND chat_token=? AND EXISTS(SELECT 1 FROM fairy_companion_state WHERE user_id=? AND last_visit>?)').bind((f.memory_md+'\n\n## A moment with my companion\nI said: '+spoken.speech).slice(-48000),uid,f.id,token,uid,at-45000));
   }
   // Mood can only be saved if this private moment was actually delivered while present.
   statements.push(env.DB.prepare('INSERT INTO fairy_moods(user_id,fairy_id,feeling,intensity,updated_at) SELECT ?,?,?,?,? WHERE '+guard+' ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,feeling=excluded.feeling,intensity=excluded.intensity,updated_at=excluded.updated_at').bind(uid,f.id,mood.feeling,mood.intensity,mood.updated_at,...args));

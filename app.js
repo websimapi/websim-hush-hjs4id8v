@@ -9,7 +9,7 @@ import {describeMood} from './mood.js';
 import {physicalDetails} from './physical.js';
 const $=id=>document.getElementById(id);
 // Every visit starts in the private world; joining the social world is explicit.
-let mode='offline',atTitle=true,inspectId=null,initiativeBusy=false,initiativeSession=0;
+let mode='offline',atTitle=true,inspectId=null,initiativeBusy=false,initiativeSession=0,entryPending=false;
 let me={signedIn:false,admin:false,fairy:null,history:[]},locals=[],worldFairies=[],activeId=null,selected=null,chatBusy=false,generationBusy=false,changing=false,transferring=false,loading=false,currentFile='soul_md',conductor=false,eventCursor=0,epoch=0;
 const world=createWorld($('world'),{onSelect:onFairySelect,onContext:showFairyMenu,onHover:(f,e)=>{const l=$('hover-label');l.hidden=atTitle||!f||!$('dialogue').hidden;if(!l.hidden){l.textContent=f.name+(owns(f.id)?' · yours':'');l.style.left=e.clientX+'px';l.style.top=(e.clientY-18)+'px';}}});
 const bubbles=createBubbles(world,$('bubble-layer'),()=>worldFairies);
@@ -36,7 +36,7 @@ function enterWorld(f){
  if(mode==='offline'&&owns(f.id))activeId=f.id;
  world.setTitle(false);drawWorld();if(mode==='offline')world.applySnapshot(offlinePoses(locals));else realtime.connect();
  world.focus(f.id);world.follow(f.id);
- const visit=++initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},2000);
+ entryPending=true;const visit=++initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},1200);
 }
 function showTitle(){
  if(transferring)return;initiativeSession++;atTitle=true;document.body.classList.add('at-title');titleUI.closeMenu();$('data-modal').close();closeConversation();realtime.close();conductor=false;
@@ -198,21 +198,21 @@ async function companionMoment(){
  const fairy=companion();
  if(atTitle||document.hidden||!fairy||initiativeBusy||chatBusy||generationBusy||transferring||changing||$('data-modal').open)return;
  if(!$('dialogue').hidden&&$('chat-input').value.trim())return;
- if(mode==='online'&&!realtime.live)return;
  initiativeBusy=true;const origin=mode,visit=initiativeSession,id=fairy.id;
  try{
-  const result=origin==='offline'?await initiativeLocal(id):await api('companion/pulse','POST',{});
+  const result=origin==='offline'?await initiativeLocal(id,entryPending):await api('companion/pulse','POST',{entered:entryPending});
   if(mode!==origin||visit!==initiativeSession||atTitle||document.hidden)return;
+  if(!result.retry)entryPending=false;
   if(origin==='offline')await refreshLocal();
   else if(result.fairy&&me.fairy?.id===id){
    me.fairy=result.fairy;if(result.speech)me.history.push({role:'assistant',content:result.speech});
    const i=worldFairies.findIndex(f=>f.id===id);if(i>=0)worldFairies[i]={...worldFairies[i],...result.fairy};drawWorld();updatePanel();realtime.refresh();
   }
   bubbles.add(result.events||[]);
- }catch{}finally{initiativeBusy=false;}
+ }catch(e){console.warn('Fairy initiative:',e.message);}finally{initiativeBusy=false;}
 }
 setInterval(companionMoment,15000);
 addEventListener('visibilitychange',()=>{
  if(document.hidden){if(mode==='online')realtime.close();return;}
- if(!atTitle){if(mode==='online')realtime.connect();const visit=initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},2200);}
+ if(!atTitle){entryPending=true;if(mode==='online')realtime.connect();const visit=initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},2200);}
 });

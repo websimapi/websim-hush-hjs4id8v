@@ -32,7 +32,7 @@ function wingGeometry(length,width){
 }
 const tuftGeometry=woolGeometry();
 export function createWorld(host,{onSelect,onHover}){
- const scene=new THREE.Scene();scene.background=new THREE.Color('#f2eef4');scene.fog=new THREE.Fog('#f2eef4',17,48);
+ const scene=new THREE.Scene();scene.background=new THREE.Color('#f2eef4');scene.fog=new THREE.Fog('#f2eef4',35,90);
  const camera=new THREE.PerspectiveCamera(36,innerWidth/innerHeight,.1,100);camera.position.set(0,1.1,8.1);
  const renderer=new THREE.WebGLRenderer({antialias:!low,alpha:false,powerPreference:'high-performance'});
  renderer.setPixelRatio(low?1:Math.min(devicePixelRatio,1.7));renderer.setSize(innerWidth,innerHeight);
@@ -42,14 +42,9 @@ export function createWorld(host,{onSelect,onHover}){
  scene.add(new THREE.HemisphereLight('#fffafd','#b1a2bd',2.4));
  const sun=new THREE.DirectionalLight('#fff5ed',3.5);sun.position.set(-3,5,5);scene.add(sun);
  const rim=new THREE.DirectionalLight('#e9dcff',2);rim.position.set(3,1,-3);scene.add(rim);
- const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!low;controls.dampingFactor=.065;controls.enablePan=true;controls.minDistance=2.8;controls.maxDistance=38;controls.maxPolarAngle=Math.PI*.64;controls.minPolarAngle=Math.PI*.22;controls.target.set(0,.25,0);controls.rotateSpeed=.4;controls.panSpeed=.5;controls.zoomSpeed=.55;
- const fairies=new Map(),hits=[];let selectedId=null,ownId=null,focus=null,lastRender=0,dirty=true,hovered=null;
- let mist;
- if(!low){
-  const rnd=rng(535),p=[],c=[];
-  for(let i=0;i<220;i++){p.push((rnd()-.5)*48,rnd()*9-2,(rnd()-.5)*40);const color=new THREE.Color().setHSL(.72+rnd()*.15,.22,.7+rnd()*.2);c.push(color.r,color.g,color.b);}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));g.setAttribute('color',new THREE.Float32BufferAttribute(c,3));mist=new THREE.Points(g,new THREE.PointsMaterial({size:.016,vertexColors:true,transparent:true,opacity:.5,depthWrite:false}));scene.add(mist);
- }
+ const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!low;controls.dampingFactor=.065;controls.enablePan=true;controls.minDistance=2.8;controls.maxDistance=65;controls.maxPolarAngle=Math.PI*.64;controls.minPolarAngle=Math.PI*.22;controls.target.set(0,.25,0);controls.rotateSpeed=.4;controls.panSpeed=.5;controls.zoomSpeed=.55;
+ const fairies=new Map(),hits=[],frames=new Map();let selectedId=null,ownId=null,focus=null,lastRender=0,dirty=true,hovered=null,framed=false,followId=null,followPrevious=null;
+ const mist=null;
  const dummy=new THREE.Object3D(),baseGeo=new THREE.SphereGeometry(.65,low?24:48,low?18:32);
  function createFairy(data,hero=false,index=0){
   const a=data.appearance,random=rng(a.seed),group=new THREE.Group();
@@ -86,8 +81,9 @@ export function createWorld(host,{onSelect,onHover}){
   if(!low){
    const halo=new THREE.Mesh(new THREE.SphereGeometry(1.5,24,16),new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{tint:{value:baseColor.clone()},strength:{value:hero?.065:.035}},vertexShader:'varying vec3 n; varying vec3 v; void main(){vec4 p=modelViewMatrix*vec4(position,1.);n=normalize(normalMatrix*normal);v=normalize(-p.xyz);gl_Position=projectionMatrix*p;}',fragmentShader:'varying vec3 n;varying vec3 v;uniform vec3 tint;uniform float strength;void main(){float a=pow(max(0.,dot(normalize(n),normalize(v))),3.)*strength;gl_FragColor=vec4(tint,a);}'}));group.add(halo);
   }
+  if(data.pose)group.position.set(data.pose.x,data.pose.y,data.pose.z);else group.position.set(a.x,.2,a.z);
   scene.add(group);
-  return {data,group,wings,body,fur,hero,phase:random()*Math.PI*2,base:new THREE.Vector3(a.x,0,a.z),hover:0};
+  return {data,group,wings,body,fur,hero,phase:random()*Math.PI*2,base:new THREE.Vector3(data.pose?.x??a.x,data.pose?.y??.2,data.pose?.z??a.z),hover:0};
  }
  function clearFairy(f){
   scene.remove(f.group);const at=hits.indexOf(f.body);if(at>=0)hits.splice(at,1);
@@ -96,18 +92,18 @@ export function createWorld(host,{onSelect,onHover}){
  function setFairies(list,id){
   const changedOwn=ownId!==id;ownId=id;
   const ids=new Set(list.map(f=>f.id));
-  for(const [key,f] of fairies){if(!ids.has(key)){clearFairy(f);fairies.delete(key);}}
+  for(const [key,f] of fairies){if(!ids.has(key)){clearFairy(f);fairies.delete(key);frames.delete(key);if(followId===key){followId=null;followPrevious=null;}}}
   list.forEach((data,i)=>{
    let f=fairies.get(data.id);const hero=data.id===ownId||data.id==='preview';
    if(f&&(JSON.stringify(f.data.appearance)!==JSON.stringify(data.appearance)||f.hero!==hero)){clearFairy(f);fairies.delete(data.id);f=null;}
    if(!f){f=createFairy(data,hero,i);fairies.set(data.id,f);}else f.data=data;
   });
-  if(changedOwn||!focus){focus=ownId||list[0]?.id;if(focus)home(true);}
+  if(list.length&&(!framed||changedOwn)){home(true);framed=true;}
   dirty=true;
  }
  function home(immediate=false){
   const f=fairies.get(ownId)||fairies.get('preview')||fairies.values().next().value;if(!f)return;
-  const target=f.base.clone().add(new THREE.Vector3(0,.25,0));
+  const target=f.group.position.clone().add(new THREE.Vector3(0,.25,0));
   const distance=innerWidth<700?10.5:7.7;
   const position=target.clone().add(new THREE.Vector3(0,.65,distance));
   if(immediate||low){controls.target.copy(target);camera.position.copy(position);controls.update();}else focus={target,position};
@@ -115,7 +111,7 @@ export function createWorld(host,{onSelect,onHover}){
  }
  const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null;
  function pick(e){pointer.set(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1);ray.setFromCamera(pointer,camera);return ray.intersectObjects(hits,false)[0]?.object.userData.fairy;}
- renderer.domElement.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY};focus=null;});
+ renderer.domElement.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY};focus=null;followId=null;followPrevious=null;});
  renderer.domElement.addEventListener('pointerup',e=>{if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6){const id=pick(e);if(id){selectedId=id;onSelect(fairies.get(id).data);}}down=null;});
  renderer.domElement.addEventListener('pointermove',e=>{const id=pick(e);hovered=id;renderer.domElement.style.cursor=id?'pointer':down?'grabbing':'grab';if(onHover)onHover(id?fairies.get(id).data:null,e);dirty=true;});
  renderer.domElement.addEventListener('pointerleave',()=>{hovered=null;onHover?.(null);});
@@ -123,20 +119,27 @@ export function createWorld(host,{onSelect,onHover}){
  function project(id,above=1.2){
   const f=fairies.get(id);if(!f)return null;
   const p=f.group.position.clone().add(new THREE.Vector3(0,above,0)).project(camera);
-  return {x:(p.x*.5+.5)*innerWidth,y:(-.5*p.y+.5)*innerHeight,visible:p.z<1&&p.z>-1};
+  return {x:(p.x*.5+.5)*innerWidth,y:(-.5*p.y+.5)*innerHeight,visible:p.z<1&&p.z>-1&&Math.abs(p.x)<1.2&&Math.abs(p.y)<1.3,distance:camera.position.distanceTo(f.group.position)};
  }
  let anchorCallback=()=>{};
  function animate(now){
   requestAnimationFrame(animate);
   const t=Date.now()/1000;
-  // Motion is cosmetic and derives from time. Durable state stays on the server.
+  // Only server snapshots move a fairy. Interpolate 220 ms behind the room.
   for(const f of fairies.values()){
-   f.group.position.copy(f.base);f.group.position.y=.15+(reduced?0:Math.sin(t*.85+f.phase)*.12);
-   f.group.rotation.z=reduced?0:Math.sin(t*.48+f.phase)*.035;
+   const timeline=frames.get(f.data.id),renderAt=performance.now()-220;
+   if(timeline?.length){
+    let left=timeline[0],right=timeline[timeline.length-1];
+    for(let i=1;i<timeline.length;i++)if(timeline[i].time>=renderAt){left=timeline[i-1];right=timeline[i];break;}
+    const alpha=right.time===left.time?1:THREE.MathUtils.clamp((renderAt-left.time)/(right.time-left.time),0,1);
+    f.group.position.set(THREE.MathUtils.lerp(left.x,right.x,alpha),THREE.MathUtils.lerp(left.y,right.y,alpha),THREE.MathUtils.lerp(left.z,right.z,alpha));
+    f.group.rotation.z=reduced?0:THREE.MathUtils.lerp(left.turn||0,right.turn||0,alpha);
+   }
    for(const w of f.wings){w.hinge.rotation.y=reduced?0:Math.sin(t*3.7+w.phase+f.phase)*.20*w.side;w.hinge.rotation.z=w.base+(reduced?0:Math.sin(t*2.5+f.phase)*.025*w.side);}
    f.hover=THREE.MathUtils.lerp(f.hover,hovered===f.data.id?1:0,.08);f.group.scale.setScalar(1+f.hover*.018);
   }
   if(focus?.target){camera.position.lerp(focus.position,.055);controls.target.lerp(focus.target,.055);if(camera.position.distanceTo(focus.position)<.015)focus=null;}
+  if(followId){const f=fairies.get(followId);if(f){if(followPrevious){const delta=f.group.position.clone().sub(followPrevious);camera.position.add(delta);controls.target.add(delta);}followPrevious=f.group.position.clone();}}
   controls.update();anchorCallback();
   if(low&&now-lastRender<1000&&!dirty)return;
   if(low&&now-lastRender<150)return;
@@ -145,5 +148,8 @@ export function createWorld(host,{onSelect,onHover}){
  }
  requestAnimationFrame(animate);
  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer?.setSize(innerWidth,innerHeight);dirty=true;});
- return {setFairies,home,project,setAnchorCallback:fn=>{anchorCallback=fn;},get ownId(){return ownId;}};
+ function applySnapshot(poses){
+  const time=performance.now();for(const p of poses){if(![p.x,p.y,p.z].every(Number.isFinite))continue;const timeline=frames.get(p.id)||[];timeline.push({...p,time});while(timeline.length>5)timeline.shift();frames.set(p.id,timeline);}dirty=true;
+ }
+ return {setFairies,home,project,applySnapshot,follow:id=>{followId=id;followPrevious=null;},setAnchorCallback:fn=>{anchorCallback=fn;},get ownId(){return ownId;}};
 }

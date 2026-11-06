@@ -32,7 +32,7 @@ function wingGeometry(length,width){
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(ix);g.computeVertexNormals();return g;
 }
 const tuftGeometry=woolGeometry();
-export function createWorld(host,{onSelect,onHover}){
+export function createWorld(host,{onSelect,onHover,onContext}){
  const scene=new THREE.Scene();scene.background=new THREE.Color('#f2eef4');scene.fog=new THREE.Fog('#f2eef4',35,90);
  const camera=new THREE.PerspectiveCamera(36,innerWidth/innerHeight,.1,100);camera.position.set(0,1.1,8.1);
  const renderer=new THREE.WebGLRenderer({antialias:!low,alpha:false,powerPreference:'high-performance'});
@@ -46,6 +46,7 @@ export function createWorld(host,{onSelect,onHover}){
  const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!low;controls.dampingFactor=.065;controls.enablePan=true;controls.minDistance=2.8;controls.maxDistance=65;controls.maxPolarAngle=Math.PI*.64;controls.minPolarAngle=Math.PI*.22;controls.target.set(0,.25,0);controls.rotateSpeed=.4;controls.panSpeed=.5;controls.zoomSpeed=.55;
  const effectTime={value:0};
  const fairies=new Map(),hits=[],frames=new Map();let selectedId=null,ownId=null,focus=null,lastRender=0,dirty=true,hovered=null,framed=false,followId=null,followPrevious=null;
+ let titleView=false,titleIds=[];
  const mist=null;
  const dummy=new THREE.Object3D(),baseGeo=new THREE.SphereGeometry(.65,low?24:48,low?18:32);
  function createFairy(data,hero=false,index=0){
@@ -56,7 +57,7 @@ export function createWorld(host,{onSelect,onHover}){
   const bodyMat=low?new THREE.MeshBasicMaterial({color:baseColor}):new THREE.MeshStandardMaterial({color:baseColor,roughness:1,emissive:baseColor,emissiveIntensity:.12});
   if(!low)livingWool(bodyMat,{time:effectTime,phase:glowPhase,color:baseColor,reduced});
   const body=new THREE.Mesh(baseGeo,bodyMat);body.userData.fairy=data.id;group.add(body);hits.push(body);
-  const count=low?(hero?2800:200):hero?12000:index<28?1300:70;
+  const count=low?(hero?2800:200):titleView?(innerWidth<700?4500:7000):hero?12000:index<28?1300:70;
   const furMat=low?new THREE.MeshBasicMaterial({color:'#ffffff'}):new THREE.MeshStandardMaterial({color:'#ffffff',roughness:1,metalness:0,emissive:baseColor,emissiveIntensity:.18});
   if(!low)livingWool(furMat,{time:effectTime,phase:glowPhase,color:baseColor,fur:true,reduced});
   const fur=new THREE.InstancedMesh(tuftGeometry,furMat,count);fur.frustumCulled=false;
@@ -85,7 +86,8 @@ export function createWorld(host,{onSelect,onHover}){
    group.add(hinge);wings.push({hinge,base:hinge.rotation.z,side,phase:upper*.9});
   }
   if(!low)addBodyAurora(group,{time:effectTime,phase:glowPhase,color:baseColor,reduced});
-  if(data.pose)group.position.set(data.pose.x,data.pose.y,data.pose.z);else group.position.set(a.x,.2,a.z);
+  const initialPose=frames.get(data.id)?.at(-1)||data.pose;
+  if(initialPose)group.position.set(initialPose.x,initialPose.y,initialPose.z);else group.position.set(a.x,.2,a.z);
   scene.add(group);
   return {data,group,wings,body,fur,hero,phase:random()*Math.PI*2,base:new THREE.Vector3(data.pose?.x??a.x,data.pose?.y??.2,data.pose?.z??a.z),hover:0};
  }
@@ -98,27 +100,40 @@ export function createWorld(host,{onSelect,onHover}){
   const ids=new Set(list.map(f=>f.id));
   for(const [key,f] of fairies){if(!ids.has(key)){clearFairy(f);fairies.delete(key);frames.delete(key);if(followId===key){followId=null;followPrevious=null;}}}
   list.forEach((data,i)=>{
-   let f=fairies.get(data.id);const hero=data.id===ownId||data.id==='preview';
+   let f=fairies.get(data.id);const hero=data.id===ownId||titleView||data.id==='preview';
    if(f&&(JSON.stringify(f.data.appearance)!==JSON.stringify(data.appearance)||f.hero!==hero)){clearFairy(f);fairies.delete(data.id);f=null;}
    if(!f){f=createFairy(data,hero,i);fairies.set(data.id,f);}else f.data=data;
   });
-  if(list.length&&(!framed||changedOwn)){home(true);framed=true;}
+  if(!titleView&&list.length&&(!framed||changedOwn)){home(true);framed=true;}
   dirty=true;
  }
- function home(immediate=false){
-  const f=fairies.get(ownId)||fairies.get('preview')||fairies.values().next().value;if(!f)return;
+ function home(immediate=false,targetId=null){
+  const f=fairies.get(targetId)||fairies.get(ownId)||fairies.get('preview')||fairies.values().next().value;if(!f)return;
   const target=f.group.position.clone().add(new THREE.Vector3(0,.25,0));
   const distance=innerWidth<700?10.5:7.7;
   const position=target.clone().add(new THREE.Vector3(0,.65,distance));
   if(immediate||low){controls.target.copy(target);camera.position.copy(position);controls.update();}else focus={target,position};
   dirty=true;
  }
- const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null;
+ const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null,holdTimer=null,held=false,multi=false;const pointers=new Set();
  function pick(e){pointer.set(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1);ray.setFromCamera(pointer,camera);return ray.intersectObjects(hits,false)[0]?.object.userData.fairy;}
- renderer.domElement.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY};focus=null;followId=null;followPrevious=null;});
- renderer.domElement.addEventListener('pointerup',e=>{if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6){const id=pick(e);if(id){selectedId=id;onSelect(fairies.get(id).data);}}down=null;});
- renderer.domElement.addEventListener('pointermove',e=>{const id=pick(e);hovered=id;renderer.domElement.style.cursor=id?'pointer':down?'grabbing':'grab';if(onHover)onHover(id?fairies.get(id).data:null,e);dirty=true;});
- renderer.domElement.addEventListener('pointerleave',()=>{hovered=null;onHover?.(null);});
+ function cancelHold(){clearTimeout(holdTimer);holdTimer=null;}
+ renderer.domElement.addEventListener('pointerdown',e=>{
+  pointers.add(e.pointerId);if(pointers.size>1){multi=true;cancelHold();return;}
+  held=false;down={x:e.clientX,y:e.clientY,button:e.button};focus=null;followId=null;followPrevious=null;
+  const id=pick(e);if(e.button===0&&id){cancelHold();holdTimer=setTimeout(()=>{if(!down||multi)return;held=true;onContext?.(fairies.get(id)?.data,{clientX:e.clientX,clientY:e.clientY});},620);}
+ });
+ renderer.domElement.addEventListener('pointerup',e=>{
+  cancelHold();if(down&&!held&&!multi&&down.button===0&&e.button===0&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6){const id=pick(e);if(id){selectedId=id;onSelect(fairies.get(id).data);}}
+  pointers.delete(e.pointerId);down=null;if(!pointers.size)multi=false;
+ });
+ renderer.domElement.addEventListener('pointercancel',e=>{cancelHold();pointers.delete(e.pointerId);down=null;if(!pointers.size)multi=false;});
+ renderer.domElement.addEventListener('pointermove',e=>{
+  if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>9)cancelHold();
+  const id=pick(e);hovered=id;renderer.domElement.style.cursor=id?'pointer':down?'grabbing':'grab';onHover?.(id?fairies.get(id).data:null,e);dirty=true;
+ });
+ renderer.domElement.addEventListener('contextmenu',e=>{const id=pick(e);if(id){e.preventDefault();cancelHold();held=true;onContext?.(fairies.get(id).data,e);}});
+ renderer.domElement.addEventListener('pointerleave',()=>{cancelHold();hovered=null;onHover?.(null);});
  controls.addEventListener('change',()=>{dirty=true;});
  function project(id,above=1.2){
   const f=fairies.get(id);if(!f)return null;
@@ -133,19 +148,20 @@ export function createWorld(host,{onSelect,onHover}){
   // Only server snapshots move a fairy. Interpolate 220 ms behind the room.
   for(const f of fairies.values()){
    const timeline=frames.get(f.data.id),renderAt=performance.now()-220;
-   if(timeline?.length){
+   if(!titleView&&timeline?.length){
     let left=timeline[0],right=timeline[timeline.length-1];
     for(let i=1;i<timeline.length;i++)if(timeline[i].time>=renderAt){left=timeline[i-1];right=timeline[i];break;}
     const alpha=right.time===left.time?1:THREE.MathUtils.clamp((renderAt-left.time)/(right.time-left.time),0,1);
     f.group.position.set(THREE.MathUtils.lerp(left.x,right.x,alpha),THREE.MathUtils.lerp(left.y,right.y,alpha),THREE.MathUtils.lerp(left.z,right.z,alpha));
     f.group.rotation.z=reduced?0:THREE.MathUtils.lerp(left.turn||0,right.turn||0,alpha);
    }
+   if(titleView){const slot=titleIds.indexOf(f.data.id);if(slot>=0){f.group.position.copy(titlePosition(slot,titleIds.length));f.group.position.y+=reduced?0:Math.sin(t*.7+f.phase)*.075;}}
    for(const w of f.wings){w.hinge.rotation.y=reduced?0:Math.sin(t*3.7+w.phase+f.phase)*.20*w.side;w.hinge.rotation.z=w.base+(reduced?0:Math.sin(t*2.5+f.phase)*.025*w.side);}
    if(low&&!reduced)f.fur.scale.setScalar(1+Math.sin(t*1.3+f.phase)*.012);
    f.hover=THREE.MathUtils.lerp(f.hover,hovered===f.data.id?1:0,.08);f.group.scale.setScalar(1+f.hover*.018);
   }
-  if(focus?.target){camera.position.lerp(focus.position,.055);controls.target.lerp(focus.target,.055);if(camera.position.distanceTo(focus.position)<.015)focus=null;}
-  if(followId){const f=fairies.get(followId);if(f){if(followPrevious){const delta=f.group.position.clone().sub(followPrevious);camera.position.add(delta);controls.target.add(delta);}followPrevious=f.group.position.clone();}}
+  if(!titleView&&focus?.target){camera.position.lerp(focus.position,.055);controls.target.lerp(focus.target,.055);if(camera.position.distanceTo(focus.position)<.015)focus=null;}
+  if(!titleView&&followId){const f=fairies.get(followId);if(f){if(followPrevious){const delta=f.group.position.clone().sub(followPrevious);camera.position.add(delta);controls.target.add(delta);}followPrevious=f.group.position.clone();}}
   controls.update();anchorCallback();
   if(low&&now-lastRender<1000&&!dirty)return;
   if(low&&now-lastRender<150)return;
@@ -153,9 +169,24 @@ export function createWorld(host,{onSelect,onHover}){
   composer?composer.render():renderer.render(scene,camera);lastRender=now;dirty=false;
  }
  requestAnimationFrame(animate);
- addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer?.setSize(innerWidth,innerHeight);dirty=true;});
+ addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer?.setSize(innerWidth,innerHeight);if(titleView)frameTitle();dirty=true;});
  function applySnapshot(poses){
   const time=performance.now();for(const p of poses){if(![p.x,p.y,p.z].every(Number.isFinite))continue;const timeline=frames.get(p.id)||[];timeline.push({...p,time});while(timeline.length>5)timeline.shift();frames.set(p.id,timeline);}dirty=true;
  }
- return {setFairies,home,project,applySnapshot,follow:id=>{followId=id;followPrevious=null;},setAnchorCallback:fn=>{anchorCallback=fn;},get ownId(){return ownId;}};
+ function titlePosition(index,count){
+  if(count===1)return new THREE.Vector3(0,0,0);
+  return innerWidth<700?new THREE.Vector3(0,(1-index)*2.55,0):new THREE.Vector3((index-1)*3.45,0,0);
+ }
+ function frameTitle(){
+  focus=null;followId=null;followPrevious=null;controls.target.set(0,0,0);
+  const count=titleIds.length;camera.position.set(0,.35,count===1?(innerWidth<700?10.5:8.0):(innerWidth<700?15.8:Math.max(12.7,11.5/(innerWidth/innerHeight))));
+  controls.update();camera.lookAt(controls.target);dirty=true;
+ }
+ function setTitle(enabled,ids=[]){
+  const changed=titleView!==enabled||JSON.stringify(titleIds)!==JSON.stringify(ids);titleView=enabled;titleIds=ids;controls.enabled=!enabled;
+  if(enabled){for(const f of fairies.values()){const i=ids.indexOf(f.data.id);if(i>=0)f.group.position.copy(titlePosition(i,ids.length));}if(changed)frameTitle();}
+  else if(changed){for(const f of fairies.values()){const last=frames.get(f.data.id)?.at(-1);if(last)f.group.position.set(last.x,last.y,last.z);else f.group.position.copy(f.base);}dirty=true;}
+ }
+ function slotProject(index,count){const p=titlePosition(index,count).project(camera);return {x:(p.x*.5+.5)*innerWidth,y:(-.5*p.y+.5)*innerHeight};}
+ return {setFairies,home,focus:id=>home(false,id),setTitle,slotProject,project,applySnapshot,follow:id=>{followId=id;followPrevious=null;},setAnchorCallback:fn=>{anchorCallback=fn;},get ownId(){return ownId;}};
 }

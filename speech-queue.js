@@ -16,14 +16,14 @@ export function createSpeechQueue(){
   l.pending.sort((a,b)=>b.priority-a.priority||(a.priority&&b.priority?(a.event.kind==='speech'?0:1)-(b.event.kind==='speech'?0:1):0));
   l.waiting=false;
  }
- function current(now=Date.now(),visible=null,clock=now){
+ function current(now=Date.now(),visible=null,clock=now,allow=null){
   const result=new Map();for(const [id,l] of lanes){
    const showing=visible===null||visible.has(id),elapsed=l.lastTick==null?0:Math.max(0,clock-l.lastTick);l.lastTick=clock;
    if(l.waiting){l.wasVisible=false;continue;}
    // Only readable time in the scene counts toward a bubble's lifetime.
    if(l.active&&showing&&l.wasVisible)l.active.remaining-=elapsed;
    if(l.active&&l.active.remaining<=0)l.active=null;
-   if(!l.active&&showing){const i=l.pending.findIndex(item=>item.ready<=now);if(i>=0){l.active=l.pending.splice(i,1)[0];l.active.remaining??=l.active.duration;}}
+   if(!l.active&&showing){const i=l.pending.findIndex(item=>item.ready<=now&&(item.priority>0||!allow||allow(item.event)));if(i>=0){l.active=l.pending.splice(i,1)[0];l.active.remaining??=l.active.duration;}}
    l.wasVisible=showing;
    if(l.active)result.set(id,l.active.event);
   }return result;

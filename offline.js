@@ -1,3 +1,4 @@
+import {solitudeRules,solitudeMood} from './solitude.js';
 import {LANGUAGE_VERSION,languageOf,canSpeak,blankSoul,learnedSoul,languageRules,learnLanguage} from './language.js';
 import {planInitiative,welcomeMood,initiativeRules} from './initiative.js';
 import {upgradeAppearance} from './physical.js';
@@ -48,13 +49,13 @@ export async function chatLocal(id,text){
  }catch(e){await editLocal(list=>{const c=list.find(x=>x.id===id);if(c?.busy===token){c.busyUntil=0;c.busy=null;}});throw e;}
 }
 export function localEvents(id,speech,thought='',partner=null,delay=0){const t=Date.now()+delay,token=crypto.randomUUID();return [...(thought?[{id:token+'t',fairy_id:id,partner_id:partner,kind:'thought',text:thought,audience:'private',at:t,expires:t+4000}]:[]),{id:token+'s',fairy_id:id,partner_id:partner,kind:'speech',text:speech,audience:'private',at:t+(thought?4000:0),expires:t+40000}];}
-export async function encounterLocal(){
+export async function encounterLocal(afk=false){
  const token=crypto.randomUUID();let a,b;
  await editLocal(list=>{
   const free=list.filter(f=>f.status==='ready'&&canSpeak(f)&&!(f.busyUntil>Date.now())&&!(f.encounterAfter>Date.now()));if(free.length<2)return;
   const pairs=[];for(let i=0;i<free.length;i++)for(let j=i+1;j<free.length;j++){const score=affinity(free[i],free[j]);if(random()<Math.max(.06,.45+score*.7))pairs.push({a:free[i],b:free[j],score});}
   if(!pairs.length){free.forEach(f=>{f.encounterAfter=Date.now()+20000;});return;}
-  const pair=pick(pairs);a=structuredClone(pair.a);b=structuredClone(pair.b);for(const f of [pair.a,pair.b]){f.busy=token;f.busyUntil=Date.now()+30000;f.encounterAfter=Date.now()+65000;}
+  const pair=pick(pairs);a=structuredClone(pair.a);b=structuredClone(pair.b);for(const f of [pair.a,pair.b]){f.busy=token;f.busyUntil=Date.now()+30000;f.encounterAfter=Date.now()+(afk?40000:65000);}
  });
  if(!a||!b)return [];
  let aSpeech,bSpeech,aThought,bThought,aMood=null,bMood=null;
@@ -117,4 +118,22 @@ function migrateLocalVoice(f){
  if(f.language?.version===LANGUAGE_VERSION)return false;
  const archive={soul_md:f.soul_md,memory_md:f.memory_md,history:f.history||[],at:Date.now()};
  f.voiceArchives=[...(f.voiceArchives||[]),archive];f.language=languageOf(null);f.soul_md=blankSoul(f.name||'Fairy');f.memory_md='# memory.md\n\nListening. No companion context established yet.';f.history=[];f.busy=null;f.busyUntil=0;f.companionState={};return true;
+}
+
+export async function solitudeLocal(id,activity,stillDisengaged=()=>true){
+ const now=Date.now(),token=crypto.randomUUID();let f;
+ await editLocal(list=>{
+  if(list.filter(x=>x.status==='ready').length!==1||activity.disengaged_ms<180000)return;
+  const current=list.find(x=>x.id===id);if(!current||!canSpeak(current)||current.busyUntil>now||(current.solitudeAfter||0)>now)return;
+  current.solitudeAfter=now+180000;current.busy=token;current.busyUntil=now+30000;f=structuredClone(current);
+ });
+ if(!f)return {events:[]};
+ try{
+  const r=await ai([{role:'system',content:solitudeRules+' For JSON return feeling, intensity, and thought.'},{role:'user',content:JSON.stringify({soul:f.soul_md,attitude:describeAttitude(f),mood:currentMood(f),activity})}],{type:'object',properties:{feeling:{type:'string',enum:['calm','happy','excited','sad','enraged']},intensity:{type:'number',minimum:0,maximum:1},thought:{type:'string'}},required:['feeling','intensity','thought'],additionalProperties:false});
+  const v=JSON.parse(r.content),mood=solitudeMood(f,v.feeling,v.intensity);let saved=false;
+  await editLocal(list=>{const current=list.find(x=>x.id===id);if(current?.busy!==token||!stillDisengaged())return;current.mood=mood;current.busy=null;current.busyUntil=0;saved=true;});
+  const at=Date.now(),thought=typeof v.thought==='string'?v.thought.trim().slice(0,140):'';
+  return {events:saved&&thought?[{id:'solitude-'+token,fairy_id:id,kind:'thought',text:thought,audience:'private',at,expires:at+10000}]:[]};
+ }catch{return {events:[]};}
+ finally{await editLocal(list=>{const current=list.find(x=>x.id===id);if(current?.busy===token){current.busy=null;current.busyUntil=0;}});}
 }

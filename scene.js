@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {livingWool,addBodyAurora,wingAurora} from './fairy-effects.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
@@ -38,22 +39,26 @@ export function createWorld(host,{onSelect,onHover}){
  renderer.setPixelRatio(low?1:Math.min(devicePixelRatio,1.7));renderer.setSize(innerWidth,innerHeight);
  renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;host.appendChild(renderer.domElement);
  let composer;
- if(!low){composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.42,.6,1.05));composer.addPass(new OutputPass());}
+ if(!low){composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.72,.72,1.08));composer.addPass(new OutputPass());}
  scene.add(new THREE.HemisphereLight('#fffafd','#b1a2bd',2.4));
  const sun=new THREE.DirectionalLight('#fff5ed',3.5);sun.position.set(-3,5,5);scene.add(sun);
  const rim=new THREE.DirectionalLight('#e9dcff',2);rim.position.set(3,1,-3);scene.add(rim);
  const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!low;controls.dampingFactor=.065;controls.enablePan=true;controls.minDistance=2.8;controls.maxDistance=65;controls.maxPolarAngle=Math.PI*.64;controls.minPolarAngle=Math.PI*.22;controls.target.set(0,.25,0);controls.rotateSpeed=.4;controls.panSpeed=.5;controls.zoomSpeed=.55;
+ const effectTime={value:0};
  const fairies=new Map(),hits=[],frames=new Map();let selectedId=null,ownId=null,focus=null,lastRender=0,dirty=true,hovered=null,framed=false,followId=null,followPrevious=null;
  const mist=null;
  const dummy=new THREE.Object3D(),baseGeo=new THREE.SphereGeometry(.65,low?24:48,low?18:32);
  function createFairy(data,hero=false,index=0){
   const a=data.appearance,random=rng(a.seed),group=new THREE.Group();
   const hue=a.hue, sat=a.saturation,light=a.lightness;
+  const glowPhase=(a.seed%10000)/10000*Math.PI*2;
   const baseColor=new THREE.Color().setHSL(hue,sat,light);
-  const bodyMat=low?new THREE.MeshBasicMaterial({color:baseColor}):new THREE.MeshStandardMaterial({color:baseColor,roughness:1});
+  const bodyMat=low?new THREE.MeshBasicMaterial({color:baseColor}):new THREE.MeshStandardMaterial({color:baseColor,roughness:1,emissive:baseColor,emissiveIntensity:.12});
+  if(!low)livingWool(bodyMat,{time:effectTime,phase:glowPhase,color:baseColor,reduced});
   const body=new THREE.Mesh(baseGeo,bodyMat);body.userData.fairy=data.id;group.add(body);hits.push(body);
   const count=low?(hero?2800:200):hero?12000:index<28?1300:70;
-  const furMat=low?new THREE.MeshBasicMaterial({color:'#ffffff'}):new THREE.MeshStandardMaterial({color:'#ffffff',roughness:1,metalness:0});
+  const furMat=low?new THREE.MeshBasicMaterial({color:'#ffffff'}):new THREE.MeshStandardMaterial({color:'#ffffff',roughness:1,metalness:0,emissive:baseColor,emissiveIntensity:.18});
+  if(!low)livingWool(furMat,{time:effectTime,phase:glowPhase,color:baseColor,fur:true,reduced});
   const fur=new THREE.InstancedMesh(tuftGeometry,furMat,count);fur.frustumCulled=false;
   const color=new THREE.Color();
   for(let i=0;i<count;i++){
@@ -72,15 +77,14 @@ export function createWorld(host,{onSelect,onHover}){
    const top=upper===0,len=a.wingLength*(top?1.18:.83),width=top?.11:.082;
    const hinge=new THREE.Group();hinge.position.set(side*(top?.81:.79),top?.25:-.16,-.1);
    hinge.rotation.z=side*(top?-.78:-2.12);
-   const wingMat=low?new THREE.MeshBasicMaterial({color:'#fffaff',side:THREE.DoubleSide,transparent:true,opacity:.95}):new THREE.MeshStandardMaterial({color:'#fffaff',emissive:'#fff5ff',emissiveIntensity:1.5,side:THREE.DoubleSide,roughness:.4,transparent:true,opacity:.85,depthWrite:false});
-   const wing=new THREE.Mesh(wingGeometry(len,width),wingMat);hinge.add(wing);
+   const wingMat=low?new THREE.MeshBasicMaterial({color:'#fffaff',side:THREE.DoubleSide,transparent:true,opacity:.95}):new THREE.MeshStandardMaterial({color:'#fffaff',emissive:'#fff5ff',emissiveIntensity:2.4,side:THREE.DoubleSide,roughness:.4,transparent:true,opacity:.85,depthWrite:false});
+   if(!low)hinge.add(wingAurora(wingGeometry(len*1.08,width*3.5),{time:effectTime,phase:glowPhase+upper+side,color:baseColor,reduced}));
+   const wing=new THREE.Mesh(wingGeometry(len,width),wingMat);wing.renderOrder=4;hinge.add(wing);
    const pts=[];for(let j=0;j<16;j++){const t=j/15;pts.push(new THREE.Vector3(Math.sin(t*Math.PI)*.075,len*t,Math.sin(t*Math.PI)*.04+.006));}
    const vein=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),20,.0025,3,false),new THREE.MeshBasicMaterial({color:'#eadff3',transparent:true,opacity:.38}));hinge.add(vein);
    group.add(hinge);wings.push({hinge,base:hinge.rotation.z,side,phase:upper*.9});
   }
-  if(!low){
-   const halo=new THREE.Mesh(new THREE.SphereGeometry(1.5,24,16),new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{tint:{value:baseColor.clone()},strength:{value:hero?.065:.035}},vertexShader:'varying vec3 n; varying vec3 v; void main(){vec4 p=modelViewMatrix*vec4(position,1.);n=normalize(normalMatrix*normal);v=normalize(-p.xyz);gl_Position=projectionMatrix*p;}',fragmentShader:'varying vec3 n;varying vec3 v;uniform vec3 tint;uniform float strength;void main(){float a=pow(max(0.,dot(normalize(n),normalize(v))),3.)*strength;gl_FragColor=vec4(tint,a);}'}));group.add(halo);
-  }
+  if(!low)addBodyAurora(group,{time:effectTime,phase:glowPhase,color:baseColor,reduced});
   if(data.pose)group.position.set(data.pose.x,data.pose.y,data.pose.z);else group.position.set(a.x,.2,a.z);
   scene.add(group);
   return {data,group,wings,body,fur,hero,phase:random()*Math.PI*2,base:new THREE.Vector3(data.pose?.x??a.x,data.pose?.y??.2,data.pose?.z??a.z),hover:0};
@@ -125,6 +129,7 @@ export function createWorld(host,{onSelect,onHover}){
  function animate(now){
   requestAnimationFrame(animate);
   const t=Date.now()/1000;
+  effectTime.value=performance.now()/1000;
   // Only server snapshots move a fairy. Interpolate 220 ms behind the room.
   for(const f of fairies.values()){
    const timeline=frames.get(f.data.id),renderAt=performance.now()-220;
@@ -136,6 +141,7 @@ export function createWorld(host,{onSelect,onHover}){
     f.group.rotation.z=reduced?0:THREE.MathUtils.lerp(left.turn||0,right.turn||0,alpha);
    }
    for(const w of f.wings){w.hinge.rotation.y=reduced?0:Math.sin(t*3.7+w.phase+f.phase)*.20*w.side;w.hinge.rotation.z=w.base+(reduced?0:Math.sin(t*2.5+f.phase)*.025*w.side);}
+   if(low&&!reduced)f.fur.scale.setScalar(1+Math.sin(t*1.3+f.phase)*.012);
    f.hover=THREE.MathUtils.lerp(f.hover,hovered===f.data.id?1:0,.08);f.group.scale.setScalar(1+f.hover*.018);
   }
   if(focus?.target){camera.position.lerp(focus.position,.055);controls.target.lerp(focus.target,.055);if(camera.position.distanceTo(focus.position)<.015)focus=null;}

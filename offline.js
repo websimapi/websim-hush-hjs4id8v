@@ -1,3 +1,4 @@
+import {upgradeAppearance} from './physical.js';
 import {attitudeOf,respondTo,affinity,describeAttitude,socialPoses} from './temperament.js';
 import {moodOf,currentMood,assessMood} from './mood.js';
 const moodSchema={type:'object',properties:{feeling:{type:'string',enum:['calm','happy','excited','sad','enraged']},intensity:{type:'number',minimum:0,maximum:1}},required:['feeling','intensity'],additionalProperties:false};
@@ -5,10 +6,16 @@ const moodRules='Attitude is how the fairy tends to react; mood is how it actual
 const DB_NAME='hush-private-v1';
 let connection;
 function db(){if(!connection)connection=new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore('fairies',{keyPath:'id'});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(new Error('Device storage is unavailable. No fairy has been saved.'));});return connection;}
-export async function localFairies(){const d=await db();return new Promise((resolve,reject)=>{const r=d.transaction('fairies').objectStore('fairies').getAll();r.onsuccess=()=>resolve(r.result.sort((a,b)=>a.created_at-b.created_at));r.onerror=()=>reject(r.error);});}
+export async function localFairies(){
+ const d=await db();return new Promise((resolve,reject)=>{
+  const tx=d.transaction('fairies','readwrite'),store=tx.objectStore('fairies'),r=store.getAll();let records,error;
+  r.onsuccess=()=>{try{records=r.result.sort((a,b)=>a.created_at-b.created_at);for(const f of records){const next=upgradeAppearance(f.appearance,f.source_id||f.id);if(JSON.stringify(next)!==JSON.stringify(f.appearance)){f.appearance=next;store.put(f);}}}catch(e){error=e;tx.abort();}};
+  tx.oncomplete=()=>resolve(records);tx.onabort=()=>reject(error||tx.error||new Error('Device upgrade could not be saved.'));tx.onerror=()=>{};
+ });
+}
 export async function editLocal(fn){
  const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction('fairies','readwrite'),s=tx.objectStore('fairies'),r=s.getAll();let value,error;
- r.onsuccess=()=>{try{const list=r.result;value=fn(list);if(list.length>3)throw new Error('All three offline slots are occupied. Free a slot first.');s.clear();for(const f of list)s.put(f);}catch(e){error=e;tx.abort();}};
+ r.onsuccess=()=>{try{const list=r.result;for(const f of list)f.appearance=upgradeAppearance(f.appearance,f.source_id||f.id);value=fn(list);for(const f of list)f.appearance=upgradeAppearance(f.appearance,f.source_id||f.id);if(list.length>3)throw new Error('All three offline slots are occupied. Free a slot first.');s.clear();for(const f of list)s.put(f);}catch(e){error=e;tx.abort();}};
  tx.oncomplete=()=>{try{localStorage.setItem('hush-local-change',String(Date.now()));}catch{}resolve(value);};tx.onabort=()=>reject(error||tx.error||new Error('Could not save on this device.'));tx.onerror=()=>{};
  });
 }
@@ -21,7 +28,7 @@ async function ai(messages,schema){
 function makeLocal(index){
  const seed=Math.floor(random()*2147483647),name=pick(['Mi','Lu','No','Fi','Ae','Ve','Ori','Thim'])+pick(['ri','lo','na','va','m','li','wen','bell']);
  const essence=pick(['A tender observer who listens before speaking.','A curious little wanderer with a playful streak.','A quiet, independent soul who treasures small kindnesses.','An exuberant dreamer who enjoys gentle mischief.']);
- const f={id:'local-'+crypto.randomUUID(),name,username:'',created_at:Date.now(),status:'creating',source:'local',appearance:{hue:random(),saturation:.25+random()*.65,lightness:.35+random()*.4,furLength:.08+random()*.06,wingLength:.85+random()*.3,seed,x:(index-1)*3.5,z:(index%2)*1.8},soul_md:'# '+name+'\n\n## Essence\n'+essence+'\n\n## Curiosities\nQuiet light, little wonders, and the company of other souls.\n\n## Voice\nSpeak naturally, with individuality and warmth.\n\n## First words\nThere you are. I was wondering when we would meet.',memory_md:'# memory.md\n\nWe have just met.',history:[],online:true};f.attitude=attitudeOf(f);f.mood=moodOf(f);return f;
+ const f={id:'local-'+crypto.randomUUID(),name,username:'',created_at:Date.now(),status:'creating',source:'local',appearance:{hue:random(),saturation:.25+random()*.65,lightness:.35+random()*.4,furLength:.08+random()*.06,seed,x:(index-1)*3.5,z:(index%2)*1.8},soul_md:'# '+name+'\n\n## Essence\n'+essence+'\n\n## Curiosities\nQuiet light, little wonders, and the company of other souls.\n\n## Voice\nSpeak naturally, with individuality and warmth.\n\n## First words\nThere you are. I was wondering when we would meet.',memory_md:'# memory.md\n\nWe have just met.',history:[],online:true};f.appearance=upgradeAppearance(f.appearance,f.id);f.attitude=attitudeOf(f);f.mood=moodOf(f);return f;
 }
 export async function generateLocal(){
  let record;await editLocal(list=>{if(list.length>=3)throw new Error('Offline has three slots, including pending moves.');record=makeLocal(list.length);list.push(record);});

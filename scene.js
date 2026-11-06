@@ -23,12 +23,15 @@ function woolGeometry(){
  }
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(n,3));g.setIndex(ix);g.computeVertexNormals();return g;
 }
-function wingGeometry(length,width){
- const v=[],uv=[],ix=[];const steps=32;
+function wingGeometry(length,width,thickness=.024,curve=.075,taper=.82){
+ // A tapered ribbon with real front/back surfaces, not a flat triangle sheet.
+ const v=[],uv=[],ix=[],steps=32;
  for(let i=0;i<=steps;i++){
-  const t=i/steps,w=Math.pow(Math.sin(Math.PI*t),.82)*width*(.65+t*.35),bend=Math.sin(t*Math.PI)*.075;
-  v.push(bend-w,length*t,Math.sin(t*Math.PI)*.04,bend+w,length*t,Math.sin(t*Math.PI)*.04);uv.push(0,t,1,t);
-  if(i<steps){const p=i*2;ix.push(p,p+1,p+2,p+1,p+3,p+2);}
+  const t=i/steps,profile=Math.max(0,Math.sin(Math.PI*t)),w=Math.pow(profile,taper)*width*(.65+t*.35),bend=profile*curve;
+  const z=profile*.04,half=thickness*.5*Math.pow(profile,.5);
+  v.push(bend-w,length*t,z+half,bend+w,length*t,z+half,bend+w,length*t,z-half,bend-w,length*t,z-half);
+  uv.push(0,t,1,t,1,t,0,t);
+  if(i<steps)for(let face=0;face<4;face++){const p=i*4+face,q=i*4+(face+1)%4;ix.push(p,q,p+4,q,q+4,p+4);}
  }
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(ix);g.computeVertexNormals();return g;
 }
@@ -51,14 +54,14 @@ export function createWorld(host,{onSelect,onHover,onContext}){
  const mist=null;
  const dummy=new THREE.Object3D(),baseGeo=new THREE.SphereGeometry(.65,low?24:48,low?18:32);
  function createFairy(data,hero=false,index=0){
-  const a=data.appearance,random=rng(a.seed),group=new THREE.Group();
+  const a=data.appearance,bodyScale=a.bodyScale,random=rng(a.seed),group=new THREE.Group();
   const hue=a.hue, sat=a.saturation,light=a.lightness;
   const glowPhase=(a.seed%10000)/10000*Math.PI*2;
   const baseColor=new THREE.Color().setHSL(hue,sat,light);
   const mood={glow:{value:1},tint:{value:0},color:{value:new THREE.Color('#d3c6e6')},activity:0};
   const bodyMat=low?new THREE.MeshBasicMaterial({color:baseColor}):new THREE.MeshStandardMaterial({color:baseColor,roughness:1,emissive:baseColor,emissiveIntensity:.12});
   if(!low)livingWool(bodyMat,{time:effectTime,phase:glowPhase,color:baseColor,mood,reduced});
-  const body=new THREE.Mesh(baseGeo,bodyMat);body.userData.fairy=data.id;group.add(body);hits.push(body);
+  const body=new THREE.Mesh(baseGeo,bodyMat);body.scale.setScalar(bodyScale);body.userData.fairy=data.id;group.add(body);hits.push(body);
   const count=low?(hero?2800:200):titleView?(innerWidth<700?4500:7000):hero?12000:index<28?1300:70;
   const furMat=low?new THREE.MeshBasicMaterial({color:'#ffffff'}):new THREE.MeshStandardMaterial({color:'#ffffff',roughness:1,metalness:0,emissive:baseColor,emissiveIntensity:.18});
   if(!low)livingWool(furMat,{time:effectTime,phase:glowPhase,color:baseColor,mood,fur:true,reduced});
@@ -74,20 +77,20 @@ export function createWorld(host,{onSelect,onHover,onContext}){
    color.setHSL(hue+(random()-.5)*.027,sat*(.7+random()*.3),Math.min(.88,light+(random()-.35)*.19+(y*.05)));
    fur.setColorAt(i,color);
   }
-  group.add(fur);
+  fur.scale.setScalar(bodyScale);group.add(fur);
   const wings=[];
   for(const side of [-1,1]) for(let upper=0;upper<2;upper++){
-   const top=upper===0,len=a.wingLength*(top?1.18:.83),width=top?.11:.082;
-   const hinge=new THREE.Group();hinge.position.set(side*(top?.81:.79),top?.25:-.16,-.1);
+   const top=upper===0,len=a.wingLength*(top?1.18:.83),width=a.wingWidth*(top?1:.745),thickness=a.wingThickness*(top?1:.85);
+   const hinge=new THREE.Group();hinge.position.set(side*(.65*bodyScale+(top?.16:.14)),(top?.25:-.16)*bodyScale,-.1);
    hinge.rotation.z=side*(top?-.78:-2.12);
    const wingMat=low?new THREE.MeshBasicMaterial({color:'#fffaff',side:THREE.DoubleSide,transparent:true,opacity:.95}):new THREE.MeshStandardMaterial({color:'#fffaff',emissive:'#fff5ff',emissiveIntensity:2.4,side:THREE.DoubleSide,roughness:.4,transparent:true,opacity:.85,depthWrite:false});
-   if(!low)hinge.add(wingAurora(wingGeometry(len*1.08,width*3.5),{time:effectTime,phase:glowPhase+upper+side,color:baseColor,mood,reduced}));
-   const wing=new THREE.Mesh(wingGeometry(len,width),wingMat);wing.renderOrder=4;hinge.add(wing);
-   const pts=[];for(let j=0;j<16;j++){const t=j/15;pts.push(new THREE.Vector3(Math.sin(t*Math.PI)*.075,len*t,Math.sin(t*Math.PI)*.04+.006));}
+   if(!low)hinge.add(wingAurora(wingGeometry(len*1.08,width*3.5,thickness*.5,a.wingCurve,a.wingTaper),{time:effectTime,phase:glowPhase+upper+side,color:baseColor,mood,reduced}));
+   const wing=new THREE.Mesh(wingGeometry(len,width,thickness,a.wingCurve,a.wingTaper),wingMat);wing.renderOrder=4;hinge.add(wing);
+   const pts=[];for(let j=0;j<16;j++){const t=j/15;pts.push(new THREE.Vector3(Math.sin(t*Math.PI)*a.wingCurve,len*t,Math.sin(t*Math.PI)*.04+thickness*.5+.004));}
    const vein=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),20,.0025,3,false),new THREE.MeshBasicMaterial({color:'#eadff3',transparent:true,opacity:.38}));hinge.add(vein);
    group.add(hinge);wings.push({hinge,base:hinge.rotation.z,side,phase:upper*.9});
   }
-  if(!low)addBodyAurora(group,{time:effectTime,phase:glowPhase,color:baseColor,mood,reduced});
+  if(!low){const shells=addBodyAurora(group,{time:effectTime,phase:glowPhase,color:baseColor,mood,reduced});for(const shell of shells)shell.scale.setScalar(bodyScale);}
   const initialPose=frames.get(data.id)?.at(-1)||data.pose;
   if(initialPose)group.position.set(initialPose.x,initialPose.y,initialPose.z);else group.position.set(a.x,.2,a.z);
   scene.add(group);
@@ -139,7 +142,7 @@ export function createWorld(host,{onSelect,onHover,onContext}){
  controls.addEventListener('change',()=>{dirty=true;});
  function project(id,above=1.2){
   const f=fairies.get(id);if(!f)return null;
-  const p=f.group.position.clone().add(new THREE.Vector3(0,above,0)).project(camera);
+  const p=f.group.position.clone().add(new THREE.Vector3(0,above*f.data.appearance.bodyScale,0)).project(camera);
   return {x:(p.x*.5+.5)*innerWidth,y:(-.5*p.y+.5)*innerHeight,visible:p.z<1&&p.z>-1&&Math.abs(p.x)<1.2&&Math.abs(p.y)<1.3,distance:camera.position.distanceTo(f.group.position)};
  }
  let anchorCallback=()=>{};
@@ -169,7 +172,7 @@ export function createWorld(host,{onSelect,onHover,onContext}){
    }
    if(titleView){const slot=titleIds.indexOf(f.data.id);if(slot>=0){f.group.position.copy(titlePosition(slot,titleIds.length));f.group.position.y+=reduced?0:Math.sin(t*.7+f.phase)*.075;}}
    for(const w of f.wings){w.hinge.rotation.y=reduced?0:Math.sin(t*3.7+w.phase+f.phase)*.20*w.side;w.hinge.rotation.z=w.base+(reduced?0:Math.sin(t*2.5+f.phase)*.025*w.side);}
-   if(low&&!reduced)f.fur.scale.setScalar(1+Math.sin(t*1.3+f.phase)*.012);
+   if(low&&!reduced)f.fur.scale.setScalar(f.data.appearance.bodyScale*(1+Math.sin(t*1.3+f.phase)*.012));
    f.hover=THREE.MathUtils.lerp(f.hover,hovered===f.data.id?1:0,.08);f.group.scale.setScalar(1+f.hover*.018);
   }
   if(!titleView&&focus?.target){camera.position.lerp(focus.position,.055);controls.target.lerp(focus.target,.055);if(camera.position.distanceTo(focus.position)<.015)focus=null;}

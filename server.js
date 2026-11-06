@@ -64,10 +64,10 @@ async function accountSignals(username) {
 function appearance(signals) {
  const age=signals.account_age_days||0, creations=signals.creation_count||0;
  const fullSpectrum=rand()<.3;
- return {hue:rand(),saturation:fullSpectrum?rand():.28+rand()*.5,lightness:fullSpectrum?.04+rand()*.92:.48+rand()*.26,
+ return upgradeAppearance({hue:rand(),saturation:fullSpectrum?rand():.28+rand()*.5,lightness:fullSpectrum?.04+rand()*.92:.48+rand()*.26,
  furLength:.075+rand()*.055+Math.min(age,1500)/1500*.02,
- wingLength:.86+rand()*.24+Math.min(creations,100)/100*.12,
- seed:Math.floor(rand()*2147483647),x:(rand()-.5)*24,z:(rand()-.5)*24};
+ // New wings use the server seed; legacy lengths are preserved by migration.
+ seed:Math.floor(rand()*2147483647),x:(rand()-.5)*24,z:(rand()-.5)*24});
 }
 async function history(env,uid,id) {
  const {results}=await env.DB.prepare(`SELECT role,content FROM fairy_messages WHERE user_id=? AND fairy_id=? ORDER BY id DESC LIMIT 14`).bind(uid,id).all();
@@ -112,6 +112,7 @@ export default {
    if(path==='/api/world'&&method==='GET') {
     const after=Math.max(0,Number(url.searchParams.get('after'))||0);
     const {results}=await env.DB.prepare(`SELECT fairies.id,fairies.username,fairies.name,fairies.appearance,fairies.created_at,fairies.last_seen,ta.warmth,ta.trust,ta.energy,ta.curiosity,mo.feeling AS mood_feeling,mo.intensity AS mood_intensity,mo.updated_at AS mood_updated,EXISTS(SELECT 1 FROM wild_visitors v WHERE v.user_id=fairies.user_id AND v.fairy_id=fairies.id AND v.expires>strftime('%s','now')*1000) AS live_online FROM fairies LEFT JOIN fairy_attitudes ta ON ta.user_id=fairies.user_id AND ta.fairy_id=fairies.id LEFT JOIN fairy_moods mo ON mo.user_id=fairies.user_id AND mo.fairy_id=fairies.id WHERE status='ready' AND created_at>=? ORDER BY fairies.created_at,fairies.user_id LIMIT 100 OFFSET ?`).bind(0,after).all();
+    await repairPhysicalRows(env,results);
     return json({t:Date.now(),fairies:results.map(publicFairy),next:results.length===100?after+100:null});
    }
    if(path==='/api/wild/events'&&method==='GET') {
@@ -149,7 +150,7 @@ export default {
      const a=b.appearance;
      if(!a||!['hue','saturation','lightness','furLength','wingLength','seed','x','z'].every(k=>typeof a[k]==='number'&&Number.isFinite(a[k])) ||a.hue<0||a.hue>1||a.saturation<0||a.saturation>1||a.lightness<.02||a.lightness>.98||a.furLength<.03||a.furLength>.2||a.wingLength<.5||a.wingLength>1.8||Math.abs(a.x)>100||Math.abs(a.z)>100) return json({error:'Invalid appearance. Hue / saturation: 0–1; lightness: .02–.98; fur: .03–.2; wing: .5–1.8; position: ±100.'},400);
      const name=clean(b.name,30).trim();if(!name) return json({error:'A name is required.'},400);
-     await env.DB.prepare(`UPDATE fairies SET name=?,soul_md=?,memory_md=?,appearance=?,status='ready',lease_until=0,chat_until=0,chat_token=NULL,token=NULL WHERE user_id=?`).bind(name,b.soul_md,b.memory_md,JSON.stringify(a),b.user_id).run();
+     await env.DB.prepare(`UPDATE fairies SET name=?,soul_md=?,memory_md=?,appearance=?,status='ready',lease_until=0,chat_until=0,chat_token=NULL,token=NULL WHERE user_id=?`).bind(name,b.soul_md,b.memory_md,JSON.stringify(upgradeAppearance(a,f.id)),b.user_id).run();
      return json({ok:true});
     }
     return json({error:'Unknown keeper action.'},404);
@@ -228,6 +229,7 @@ async function encounter(env,uid) {
  const caller=await env.DB.prepare('SELECT 1 AS yes FROM wild_visitors WHERE user_id=? AND expires>? LIMIT 1').bind(uid,now).first();
  if(!caller)return json({idle:true});
  const {results:online}=await env.DB.prepare("SELECT f.*,ta.warmth,ta.trust,ta.energy,ta.curiosity,mo.feeling AS mood_feeling,mo.intensity AS mood_intensity,mo.updated_at AS mood_updated FROM fairies f LEFT JOIN fairy_attitudes ta ON ta.user_id=f.user_id AND ta.fairy_id=f.id LEFT JOIN fairy_moods mo ON mo.user_id=f.user_id AND mo.fairy_id=f.id JOIN (SELECT DISTINCT user_id FROM wild_visitors WHERE expires>?) v ON v.user_id=f.user_id WHERE f.status='ready' AND f.chat_until<? LIMIT 60").bind(now,now).all();
+ await repairPhysicalRows(env,online);
  if(online.length<2)return json({idle:true});
  const a=online[Math.floor(rand()*online.length)],ap=wildPose(a,now);
  let b=null,d=144;
@@ -267,6 +269,7 @@ function roomFairy(f){return {...publicFairy(f),online:connected(f.user_id)};}
 async function scanWorld(room,env,now){
  if(now<scanNext)return;
  const {results}=await env.DB.prepare("SELECT f.user_id,f.id,f.username,f.name,f.appearance,f.created_at,f.last_seen,ta.warmth,ta.trust,ta.energy,ta.curiosity,mo.feeling AS mood_feeling,mo.intensity AS mood_intensity,mo.updated_at AS mood_updated FROM fairies f LEFT JOIN fairy_attitudes ta ON ta.user_id=f.user_id AND ta.fairy_id=f.id LEFT JOIN fairy_moods mo ON mo.user_id=f.user_id AND mo.fairy_id=f.id WHERE f.status='ready' AND f.user_id>? ORDER BY f.user_id LIMIT 100").bind(scanCursor).all();
+ await repairPhysicalRows(env,results);
  const updates=[];
  for(const f of results){scanSeen.add(f.id);const old=wildRoster.get(f.id);wildRoster.set(f.id,f);if(!old||old.name!==f.name||old.appearance!==f.appearance||JSON.stringify(attitudeOf(old))!==JSON.stringify(attitudeOf(f))||JSON.stringify(moodOf(old))!==JSON.stringify(moodOf(f)))updates.push(roomFairy(f));}
  if(updates.length)room.broadcast({type:'world-upsert',fairies:updates,t:now});
@@ -406,7 +409,7 @@ function socialPoses(fairies,now){
  });
 }
 
-async function readOwned(env,uid){return env.DB.prepare('SELECT f.*,a.warmth,a.trust,a.energy,a.curiosity,m.feeling AS mood_feeling,m.intensity AS mood_intensity,m.updated_at AS mood_updated FROM fairies f LEFT JOIN fairy_attitudes a ON a.user_id=f.user_id AND a.fairy_id=f.id LEFT JOIN fairy_moods m ON m.user_id=f.user_id AND m.fairy_id=f.id WHERE f.user_id=?').bind(uid).first();}
+async function readOwned(env,uid){const f=await env.DB.prepare('SELECT f.*,a.warmth,a.trust,a.energy,a.curiosity,m.feeling AS mood_feeling,m.intensity AS mood_intensity,m.updated_at AS mood_updated FROM fairies f LEFT JOIN fairy_attitudes a ON a.user_id=f.user_id AND a.fairy_id=f.id LEFT JOIN fairy_moods m ON m.user_id=f.user_id AND m.fairy_id=f.id WHERE f.user_id=?').bind(uid).first();if(f)await repairPhysicalRows(env,[f]);return f;}
 function saveAttitude(env,f,a,chatToken=null,eventTime=0){
  const guard=chatToken?"AND chat_token=?":"AND chat_until<strftime('%s','now')*1000 AND EXISTS(SELECT 1 FROM wild_events WHERE user_id=? AND fairy_id=? AND audience='public' AND at>=?)";
  const values=[f.user_id,f.id,a.warmth,a.trust,a.energy,a.curiosity,Date.now(),f.user_id,f.id];
@@ -509,4 +512,56 @@ function saveMood(env,f,m,chatToken=null,eventTime=0){
  const guard=chatToken?'AND chat_token=?':"AND chat_until<strftime('%s','now')*1000 AND EXISTS(SELECT 1 FROM wild_events WHERE user_id=? AND fairy_id=? AND audience='public' AND at>=?)";
  const values=[f.user_id,f.id,m.feeling,m.intensity,m.updated_at,f.user_id,f.id,...(chatToken?[chatToken]:[f.user_id,f.id,eventTime])];
  return env.DB.prepare('INSERT INTO fairy_moods(user_id,fairy_id,feeling,intensity,updated_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fairies WHERE user_id=? AND id=? '+guard+') ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,feeling=excluded.feeling,intensity=excluded.intensity,updated_at=excluded.updated_at').bind(...values);
+}
+
+// Physical migrations share identical rules with device saves. Online execution is server-only.
+// Append idempotent migrations here for future physical upgrades. Never reroll valid traits.
+const PHYSICAL_VERSION=1;
+function physicalHash(value){let h=2166136261;for(const c of String(value)){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+function physicalUnit(seed,key){return physicalHash(seed+':'+key)/4294967296;}
+function physicalNumber(a,key,min,max,fallback){if(typeof a[key]!=='number'||!Number.isFinite(a[key])||a[key]<min||a[key]>max)a[key]=fallback;}
+const physicalMigrations=[
+ function dimensionsV1(a,identity){
+  physicalNumber(a,'seed',0,2147483647,physicalHash(identity||'hush-fairy')%2147483647);
+  a.seed=Math.floor(a.seed);
+  const u=key=>physicalUnit(a.seed,key);
+  physicalNumber(a,'hue',0,1,u('hue'));
+  physicalNumber(a,'saturation',0,1,.28+u('saturation')*.5);
+  physicalNumber(a,'lightness',.02,.98,.48+u('lightness')*.26);
+  physicalNumber(a,'furLength',.03,.2,.08+u('furLength')*.06);
+  physicalNumber(a,'x',-100,100,(u('x')-.5)*24);
+  physicalNumber(a,'z',-100,100,(u('z')-.5)*24);
+  physicalNumber(a,'wingLength',.5,1.8,.70+u('wingLength')*.75);
+  physicalNumber(a,'wingWidth',.045,.23,.065+u('wingWidth')*.115);
+  physicalNumber(a,'wingThickness',.008,.075,.014+u('wingThickness')*.036);
+  physicalNumber(a,'wingCurve',.02,.18,.04+u('wingCurve')*.08);
+  physicalNumber(a,'wingTaper',.5,1.4,.65+u('wingTaper')*.5);
+  physicalNumber(a,'bodyScale',.75,1.3,.84+u('bodyScale')*.34);
+  // Fictional mass, not real-world measurements: constant body density + four wings.
+  a.massMg=Math.round((12*a.bodyScale**3+4*a.wingLength*a.wingWidth*a.wingThickness*10)*100)/100;
+ }
+];
+function upgradeAppearance(value,identity=''){
+ let source=value;
+ if(typeof source==='string'){try{source=JSON.parse(source);}catch{source={};}}
+ const a=source&&typeof source==='object'&&!Array.isArray(source)?{...source}:{};
+ // Re-run repairs even for a current record: missing/corrupt fields can occur at any version.
+ for(const migration of physicalMigrations)migration(a,identity);
+ a.appearanceVersion=Math.max(PHYSICAL_VERSION,Number.isInteger(a.appearanceVersion)?a.appearanceVersion:0);
+ return a;
+}
+function physicalDetails(a){
+ if(!a)return [];
+ return [['Body',a.bodyScale.toFixed(2)+'×'],['Mass',a.massMg.toFixed(1)+' mg'],['Wing length',a.wingLength.toFixed(2)+'×'],['Wing width',(a.wingWidth/.11).toFixed(2)+'×'],['Wing thickness',(a.wingThickness/.024).toFixed(2)+'×']];
+}
+
+async function repairPhysicalRows(env,rows){
+ const repairs=[];
+ for(const f of rows){const serialized=JSON.stringify(upgradeAppearance(f.appearance,f.id));if(serialized!==f.appearance)repairs.push({f,old:f.appearance,next:serialized});}
+ if(!repairs.length)return;
+ // Compare-and-swap prevents an auto-upgrade overwriting a concurrent keeper edit.
+ const result=await env.DB.batch(repairs.map(r=>env.DB.prepare('UPDATE fairies SET appearance=? WHERE id=? AND appearance=?').bind(r.next,r.f.id,r.old)));
+ const conflicts=[];
+ repairs.forEach((r,i)=>{if(result[i].meta.changes)r.f.appearance=r.next;else conflicts.push(r.f);});
+ if(conflicts.length){const {results}=await env.DB.prepare('SELECT id,appearance FROM fairies WHERE id IN ('+conflicts.map(()=>'?').join(',')+')').bind(...conflicts.map(f=>f.id)).all();const latest=new Map(results.map(f=>[f.id,f.appearance]));for(const f of conflicts)if(latest.has(f.id))f.appearance=latest.get(f.id);}
 }

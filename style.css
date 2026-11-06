@@ -32,3 +32,5 @@ body:not(.at-title) #title-tabs,body:not(.at-title) #title-fairies{display:none!
 #data-modal>.modal-head{justify-content:space-between;min-height:22px}#data-modal>h2{margin-top:0;font-size:34px}#data-modal .danger-zone{padding-top:14px;margin-top:18px}
 #data-modal:has(#delete-confirm:not([hidden])) #soul-files,#data-modal:has(#transfer-confirm:not([hidden])) #soul-files,#data-modal:has(#delete-confirm:not([hidden])) .storage-details,#data-modal:has(#transfer-confirm:not([hidden])) .storage-details{display:none!important}
 @media(max-width:700px){#title-tabs{top:20px;gap:30px}#title-tabs button{font-size:11px}.fairy-pick{width:min(330px,90vw);height:180px}.slot-add{width:48px;height:48px;font-size:26px}#return-title{top:20px;left:19px;width:32px;height:32px}.slot-pending{bottom:5px}#fairy-menu{width:165px}}
+
+.physical-details{display:grid;grid-template-columns:1fr auto;gap:7px 20px;margin:18px 0 22px;padding:14px 0;border-block:1px solid var(--line);font-size:11px}.physical-details dt{color:var(--muted)}.physical-details dd{margin:0;font-variant-numeric:tabular-nums;color:var(--ink)}

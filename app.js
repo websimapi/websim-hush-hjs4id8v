@@ -6,6 +6,7 @@ import {describeAttitude} from './temperament.js';
 import {setupAdmin} from './admin.js';
 import {createTitleUI} from './title-ui.js';
 import {describeMood} from './mood.js';
+import {physicalDetails} from './physical.js';
 const $=id=>document.getElementById(id);
 // Every visit starts in the private world; joining the social world is explicit.
 let mode='offline',atTitle=true,inspectId=null;
@@ -85,6 +86,8 @@ function updatePanel(){
  const f=settingsFairy(),offline=mode==='offline';
  $('mode-offline').classList.toggle('active',offline);$('mode-online').classList.toggle('active',!offline);$('mode-offline').setAttribute('aria-selected',String(offline));$('mode-online').setAttribute('aria-selected',String(!offline));
  $('data-name').textContent=f?f.name:'Details';
+ const traits=$('physical-details');traits.hidden=!f;traits.replaceChildren();
+ for(const [label,value] of physicalDetails(f?.appearance)){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;if(label==='Mass')dd.title='Simulated fairy mass, in milligrams.';else dd.title='Relative to a typical fairy.';traits.append(dt,dd);}
  $('account-link').replaceChildren();if(!offline&&(f?.username||me.username))$('account-link').append(profile(f?.username||me.username));
  $('data-status').textContent=f?describeAttitude(f)+' · feeling '+describeMood(f):'';
  $('storage-note').textContent=offline?'Souls, memories, attitudes and conversations are saved in IndexedDB on this device. Connected AI can process dialogue; without it, replies are local. Clearing browser storage erases these fairies.':'Online souls and memories are saved on the authoritative server. Offline fairies cannot be brought here.';

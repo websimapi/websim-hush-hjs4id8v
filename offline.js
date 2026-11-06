@@ -1,3 +1,4 @@
+import {planInitiative,welcomeMood,initiativeRules,fallbackInitiative} from './initiative.js';
 import {upgradeAppearance} from './physical.js';
 import {attitudeOf,respondTo,affinity,describeAttitude,socialPoses} from './temperament.js';
 import {moodOf,currentMood,assessMood} from './mood.js';
@@ -61,7 +62,7 @@ export async function chatLocal(id,text){
    const v=JSON.parse(r.content);if(typeof v.reply!=='string'||!v.reply.trim())throw new Error('Empty reply');reply=v.reply.slice(0,2500);thought=String(v.thought||'').slice(0,180);proposedMood=v.mood;usedAI=true;
   }catch{reply=fallbackReply({...f,attitude},text);thought=attitude.trust<-.3?'A little space to feel safe again.':attitude.energy>.3?'A tiny spark of possibility.':'Warmth settling into the wool.';}
   const mood=assessMood(f,proposedMood,text,attitude);
-  await editLocal(list=>{const current=list.find(x=>x.id===id);if(!current||current.busy!==token)throw new Error('The fairy was removed while listening.');current.attitude=attitude;current.mood=mood;current.history.push({role:'user',content:text,created_at:Date.now()},{role:'assistant',content:reply,created_at:Date.now()});current.memory_md=(current.memory_md+'\n\n## A moment together\nCompanion: '+text+'\nFairy: '+reply).slice(-48000);current.busyUntil=0;current.busy=null;current.lastDialogue=usedAI?'AI':'local';});
+  await editLocal(list=>{const current=list.find(x=>x.id===id);if(!current||current.busy!==token)throw new Error('The fairy was removed while listening.');current.attitude=attitude;current.mood=mood;current.companionState={...(current.companionState||{}),unanswered:0,last_visit:Date.now(),next_at:Date.now()+75000};current.history.push({role:'user',content:text,created_at:Date.now()},{role:'assistant',content:reply,created_at:Date.now()});current.memory_md=(current.memory_md+'\n\n## A moment together\nCompanion: '+text+'\nFairy: '+reply).slice(-48000);current.busyUntil=0;current.busy=null;current.lastDialogue=usedAI?'AI':'local';});
   return {reply,thought,mood,usedAI,events:localEvents(id,reply,thought)};
  }catch(e){await editLocal(list=>{const c=list.find(x=>x.id===id);if(c?.busy===token){c.busyUntil=0;c.busy=null;}});throw e;}
 }
@@ -104,3 +105,30 @@ export async function finishTransfer(id,history){
 }
 export async function activateTransfer(id){await editLocal(list=>{const f=list.find(x=>x.id===id);if(!f?.transfer.complete)throw new Error('Local copy is incomplete.');f.status='ready';delete f.transfer;f.busy=null;f.busyUntil=0;});}
 export async function deleteLocal(id){await editLocal(list=>{const i=list.findIndex(f=>f.id===id);if(i>=0)list.splice(i,1);});}
+
+export async function initiativeLocal(id){
+ const now=Date.now(),token=crypto.randomUUID();let f,plan;
+ await editLocal(list=>{
+  const current=list.find(x=>x.id===id&&x.status==='ready');if(!current||current.busyUntil>now)return;
+  const state=current.companionState||{};plan=planInitiative(current,state,now,random);
+  if(!plan){state.last_visit=now;current.companionState=state;return;}
+  current.companionState={...state,...plan};if(plan.kind==='quiet')return;
+  current.busy=token;current.busyUntil=now+30000;f=structuredClone(current);
+ });
+ if(!f)return {events:[]};
+ let spoken=fallbackInitiative(f,plan),mood=welcomeMood(f,plan);
+ try{
+  try{
+   const r=await ai([{role:'system',content:initiativeRules+' '+moodRules+' Return speech (empty for thought-only), thought (empty if speaking), and mood.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['speech','thought','mood'],additionalProperties:false});
+   const v=JSON.parse(r.content);const value=plan.kind==='thought'?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
+   spoken=plan.kind==='thought'?{speech:'',thought:text.slice(0,140)}:{speech:text.slice(0,300),thought:''};mood=assessMood(f,v.mood,'',attitudeOf(f));
+  }catch{}
+  let saved=false;
+  await editLocal(list=>{const current=list.find(x=>x.id===id);if(current?.busy!==token)return;
+   current.mood=mood;if(spoken.speech){current.history.push({role:'assistant',content:spoken.speech,created_at:Date.now()});current.memory_md=(current.memory_md+'\n\n## A moment with my companion\nI said: '+spoken.speech).slice(-48000);}
+   current.busy=null;current.busyUntil=0;saved=true;
+  });
+  const at=Date.now(),events=saved?[{id:'initiative-'+token,fairy_id:id,kind:spoken.speech?'speech':'thought',text:spoken.speech||spoken.thought,audience:'private',at,expires:at+(spoken.speech?22000:10000)}]:[];
+  return {events};
+ }finally{await editLocal(list=>{const c=list.find(x=>x.id===id);if(c?.busy===token){c.busy=null;c.busyUntil=0;}});}
+}

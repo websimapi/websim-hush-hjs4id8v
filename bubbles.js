@@ -7,8 +7,11 @@ export function createBubbles(world,host,getFairies){
  function listening(id,value){if(value)queue.pause(id,Date.now()+offset);}
  function respond(id,list){queue.respond(id,list,Date.now()+offset);}
  function clear(id){queue.clear(id);nodes.get(id)?.remove();nodes.delete(id);}
+ document.addEventListener('visibilitychange',()=>queue.suspend());
  function update(){
-  const fairies=new Map(getFairies().map(f=>[f.id,f])),chosen=queue.current(Date.now()+offset);
+  const fairies=new Map(getFairies().map(f=>[f.id,f])),visible=new Set();
+  if(!document.hidden)for(const [id] of fairies){const p=world.project(id,1.12);if(p?.visible&&p.distance<40)visible.add(id);}
+  const chosen=queue.current(Date.now()+offset,visible,performance.now());
   for(const [id,f] of fairies)if(!canSpeak(f)){queue.clear(id);chosen.delete(id);}
   for(const [id,node] of nodes)if(!chosen.has(id)){node.remove();nodes.delete(id);}
   for(const [id,e] of chosen){

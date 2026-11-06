@@ -1,4 +1,4 @@
-const CACHE='hush-device-shell-v10';
+const CACHE='hush-device-shell-v11';
 const FILES=['./','index.html','app.js','style.css','scene.js','fairy-effects.js','bubbles.js','multiplayer.js','offline.js','temperament.js','admin.js','title-ui.js','mood.js','physical.js','initiative.js','speech-queue.js','language.js'];
 const ROOTS=['https://esm.sh/three@0.170.0',...['controls/OrbitControls','postprocessing/EffectComposer','postprocessing/RenderPass','postprocessing/UnrealBloomPass','postprocessing/OutputPass'].map(p=>'https://esm.sh/three@0.170.0/examples/jsm/'+p+'.js')];
 self.addEventListener('install',event=>event.waitUntil((async()=>{

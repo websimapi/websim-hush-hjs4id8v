@@ -34,3 +34,6 @@ body:not(.at-title) #title-tabs,body:not(.at-title) #title-fairies{display:none!
 @media(max-width:700px){#title-tabs{top:20px;gap:30px}#title-tabs button{font-size:11px}.fairy-pick{width:min(330px,90vw);height:180px}.slot-add{width:48px;height:48px;font-size:26px}#return-title{top:20px;left:19px;width:32px;height:32px}.slot-pending{bottom:5px}#fairy-menu{width:165px}}
 
 .physical-details{display:grid;grid-template-columns:1fr auto;gap:7px 20px;margin:18px 0 22px;padding:14px 0;border-block:1px solid var(--line);font-size:11px}.physical-details dt{color:var(--muted)}.physical-details dd{margin:0;font-variant-numeric:tabular-nums;color:var(--ink)}
+
+/* Keep the void truly black; retain the readable pale conversation surfaces. */
+body{background:#000}#title-tabs button{color:#bcaecc}#title-tabs button.active{color:#f1e5ff;border-bottom-color:#c9ace5}.slot-add{color:#d8c3ed;border-color:#a58bb96b}#mode-label{color:#d0bbdf}#return-title{background:#19131dcc;color:#e0cbea;border-color:#b99bcb55}

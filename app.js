@@ -40,7 +40,7 @@ function enterWorld(f){
  if(mode==='offline'&&owns(f.id))activeId=f.id;
  world.setTitle(false);drawWorld();if(mode==='offline')world.applySnapshot(offlinePoses(locals));else realtime.connect();
  world.focus(f.id);world.follow(f.id);
- sendActivity();entryPending=true;const visit=++initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},1200);setTimeout(ambientMoment,9000);
+ sendActivity();entryPending=true;const visit=++initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},100);setTimeout(ambientMoment,9000);
 }
 function showTitle(){
  if(transferring)return;initiativeSession++;atTitle=true;document.body.classList.add('at-title');titleUI.closeMenu();$('data-modal').close();closeConversation();realtime.close();conductor=false;
@@ -182,7 +182,7 @@ let nextLocalEncounter=0,solitudeBusy=false,solitudeNext=0;
 addEventListener('keydown',e=>{if(e.key==='Escape')closeConversation();});
 addEventListener('storage',e=>{if(e.key==='hush-local-change')refreshLocal().catch(()=>{});});
 setInterval(()=>{if(mode==='offline'&&!document.hidden)world.applySnapshot(offlinePoses(locals));},100);
-setInterval(async()=>{if(atTitle||mode!=='offline'||document.hidden||generationBusy||transferring||initiativeBusy||chatBusy||Date.now()<nextLocalEncounter)return;nextLocalEncounter=Date.now()+(activity.snapshot(companion()?.id).afk?18000:35000);try{const events=await encounterLocal(activity.snapshot(companion()?.id).afk);await refreshLocal();if(mode==='offline')bubbles.add(events);}catch{}},5000);
+setInterval(async()=>{if(atTitle||entryPending||mode!=='offline'||document.hidden||generationBusy||transferring||initiativeBusy||chatBusy||Date.now()<nextLocalEncounter)return;nextLocalEncounter=Date.now()+(activity.snapshot(companion()?.id).afk?18000:35000);try{const events=await encounterLocal(activity.snapshot(companion()?.id).afk);await refreshLocal();if(mode==='offline')bubbles.add(events);}catch{}},5000);
 setInterval(async()=>{if(atTitle||mode!=='online'||document.hidden||realtime.live)return;try{await loadWorld();const data=await api('wild/events?after='+eventCursor);if(mode!=='online')return;bubbles.syncClock(data.t);bubbles.add(data.events);data.events.forEach(e=>{eventCursor=Math.max(eventCursor,e.id);});}catch{}},3500);
 setInterval(async()=>{if(mode!=='online'||document.hidden||chatBusy||transferring)return;try{await ensureAccount();updatePanel();drawWorld();}catch{}},45000);
 setInterval(()=>{if(!atTitle&&mode==='online'&&conductor&&realtime.live&&me.fairy)api('wild/encounter','POST',{}).catch(()=>{});},20000);
@@ -198,31 +198,31 @@ boot();
 
 async function companionMoment(){
  const fairy=companion();
- if(atTitle||document.hidden||!fairy||!canSpeak(fairy)||initiativeBusy||digestBusy||chatBusy||generationBusy||transferring||changing||$('data-modal').open)return;
+ if(atTitle||document.hidden||!fairy||(!entryPending&&!canSpeak(fairy))||initiativeBusy||(!entryPending&&digestBusy)||chatBusy||generationBusy||transferring||changing||$('data-modal').open)return;
  if(activity.snapshot(fairy.id).afk)return;
  if(!$('dialogue').hidden&&$('chat-input').value.trim())return;
  initiativeBusy=true;const origin=mode,visit=initiativeSession,id=fairy.id;
  try{
   const result=origin==='offline'?await initiativeLocal(id,entryPending):await api('companion/pulse','POST',{entered:entryPending,afk:activity.snapshot(id).afk});
   if(mode!==origin||visit!==initiativeSession||atTitle||document.hidden)return;
-  if(!result.retry)entryPending=false;
+  if(!result.retry&&result.events?.some(e=>e.fairy_id===id&&e.kind==='speech'))entryPending=false;
   if(origin==='offline')await refreshLocal();
   else if(result.fairy&&me.fairy?.id===id){
    me.fairy=result.fairy;if(result.speech)me.history.push({role:'assistant',content:result.speech});
    const i=worldFairies.findIndex(f=>f.id===id);if(i>=0)worldFairies[i]={...worldFairies[i],...result.fairy};drawWorld();updatePanel();realtime.refresh();
   }
   bubbles.add(result.events||[]);
- }catch(e){console.warn('Fairy initiative:',e.message);}finally{initiativeBusy=false;}
+ }catch(e){console.warn('Fairy initiative:',e.message);}finally{initiativeBusy=false;if(entryPending&&!atTitle&&visit===initiativeSession)setTimeout(companionMoment,1000);}
 }
 setInterval(companionMoment,7000);
 addEventListener('visibilitychange',()=>{
  if(document.hidden){if(mode==='online')realtime.close();return;}
- if(!atTitle){entryPending=true;if(mode==='online')realtime.connect();const visit=initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},2200);}
+ if(!atTitle){entryPending=true;if(mode==='online')realtime.connect();const visit=initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},100);}
 });
 
 let ambientBusy=false,ambientNext=0;
 async function ambientMoment(){
- if(atTitle||mode!=='online'||document.hidden||chatBusy||initiativeBusy||ambientBusy||generationBusy||transferring||changing||Date.now()<ambientNext||$('data-modal').open)return;
+ if(atTitle||entryPending||mode!=='online'||document.hidden||chatBusy||initiativeBusy||ambientBusy||generationBusy||transferring||changing||Date.now()<ambientNext||$('data-modal').open)return;
  if(!$('dialogue').hidden&&$('chat-input').value.trim())return;
  const visible=worldFairies.filter(f=>{if(!canSpeak(f))return false;const p=world.project(f.id,0);return p?.visible&&p.distance<35;}).map(f=>f.id);
  if(!visible.some(id=>id!==me.fairy?.id))return;
@@ -232,7 +232,7 @@ async function ambientMoment(){
 setInterval(ambientMoment,7000);
 
 async function digestOwnEncounters(){
- if(mode!=='online'||!me.signedIn||!me.fairy||document.hidden||digestBusy||chatBusy||initiativeBusy||transferring||!digestPending||Date.now()<digestRetryAt)return;
+ if(mode!=='online'||!me.signedIn||!me.fairy||document.hidden||entryPending||digestBusy||chatBusy||initiativeBusy||transferring||!digestPending||Date.now()<digestRetryAt)return;
  digestBusy=true;const id=me.fairy.id;
  try{
   const result=await api('companion/digest','POST',{});

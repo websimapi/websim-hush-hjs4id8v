@@ -37,7 +37,7 @@ function wingGeometry(length,width,thickness=.024,curve=.075,taper=.82){
 }
 const tuftGeometry=woolGeometry();
 export function createWorld(host,{onSelect,onHover,onContext}){
- const scene=new THREE.Scene();scene.background=new THREE.Color('#f2eef4');scene.fog=new THREE.Fog('#f2eef4',35,90);
+ const scene=new THREE.Scene();scene.background=new THREE.Color('#000000');scene.fog=new THREE.Fog('#000000',35,90);
  const camera=new THREE.PerspectiveCamera(36,innerWidth/innerHeight,.1,100);camera.position.set(0,1.1,8.1);
  const renderer=new THREE.WebGLRenderer({antialias:!low,alpha:false,powerPreference:'high-performance'});
  renderer.setPixelRatio(low?1:Math.min(devicePixelRatio,1.7));renderer.setSize(innerWidth,innerHeight);

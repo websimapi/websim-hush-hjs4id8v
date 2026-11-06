@@ -604,11 +604,11 @@ function companionEagerness(f,now=Date.now()){
  return initiativeClamp(.82+a.warmth*.16+a.trust*.24+a.energy*.09+a.curiosity*.10-hurt,.04,.98);
 }
 function planInitiative(f,state={},now=Date.now(),random=Math.random,entered=false){
- const arrival=(!state.last_visit||now-state.last_visit>120000||entered)&&(!state.last_greet||now-state.last_greet>60000);
+ const arrival=entered||((!state.last_visit||now-state.last_visit>120000)&&(!state.last_greet||now-state.last_greet>60000));
  if(!arrival&&(state.next_at||0)>now)return null;
  const eagerness=companionEagerness(f,now),unanswered=arrival?0:Number(state.unanswered)||0;
  let kind;
- if(arrival)kind=eagerness>=.55||random()<eagerness?'greeting':'thought';
+ if(arrival)kind='greeting';
  else kind=random()<eagerness*.78/(1+Math.min(unanswered,5)*.16)?'speech':random()<.90?'thought':'quiet';
  // Less eager souls and unanswered invitations get more breathing room.
  const delay=arrival?22000+random()*14000:28000+random()*25000+(1-eagerness)*45000+Math.min(unanswered,5)*5000;
@@ -626,9 +626,9 @@ async function companionPulse(request,env,uid){
  const now=Date.now(),body=await request.json().catch(()=>({}));
  // This authenticated in-game heartbeat also works if the social socket is reconnecting.
  // It never creates public/social presence or exposes private events to anyone else.
- const f=await readOwned(env,uid);if(!f||f.status!=='ready'||!canSpeak(f))return json({idle:true});
+ const f=await readOwned(env,uid);if(!f||f.status!=='ready'||(!body.entered&&!canSpeak(f)))return json({idle:true});
  const activity=await env.DB.prepare('SELECT last_input,last_heartbeat FROM fairy_activity WHERE user_id=? AND fairy_id=?').bind(uid,f.id).first();
- if(body.afk===true||(activity&&now-activity.last_heartbeat<45000&&now-activity.last_input>=60000))return json({idle:true});
+ if(body.afk===true||(!body.entered&&activity&&now-activity.last_heartbeat<45000&&now-activity.last_input>=60000))return json({idle:true});
  if(f.chat_until>now)return json({idle:true,retry:true});
  await env.DB.prepare('INSERT INTO fairy_companion_state(user_id,fairy_id) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,last_visit=0,next_at=0,unanswered=0 WHERE fairy_companion_state.fairy_id!=excluded.fairy_id').bind(uid,f.id).run();
  const state=await env.DB.prepare('SELECT * FROM fairy_companion_state WHERE user_id=?').bind(uid).first();
@@ -639,16 +639,18 @@ async function companionPulse(request,env,uid){
  const token=crypto.randomUUID();
  const lock=await env.DB.prepare('UPDATE fairies SET chat_token=?,chat_until=? WHERE user_id=? AND id=? AND chat_until<?').bind(token,now+60000,uid,f.id,now).run();
  if(!lock.meta.changes)return json({idle:true,retry:true});
+ let delivered=false;
  try{
   const claim=await env.DB.prepare('UPDATE fairy_companion_state SET last_visit=?,next_at=?,unanswered=? WHERE user_id=? AND fairy_id=? AND next_at=?').bind(now,plan.next_at,plan.unanswered,uid,f.id,state.next_at).run();
   if(!claim.meta.changes||plan.kind==='quiet')return json({idle:true});
-  if(plan.arrival)await env.DB.prepare('INSERT INTO fairy_companion_welcomes(user_id,fairy_id,last_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,last_at=excluded.last_at').bind(uid,f.id,now).run();
+  // Record a welcome only after an actual spoken event has been saved.
   let spoken={speech:'',thought:''},mood=welcomeMood(f,plan);
   try{
    const recent=await history(env,uid,f.id);
-   const {content}=await env.AI.chat({messages:[...(await privateWebsimMessages(env,uid,request.headers.get('x-websim-username')||'')),{role:'system',content:initiativeRules+' Choose your own action and topic, not necessarily the suggested moment. Return four labelled lines: ACTION: speak, think, or quiet. SPEECH: one sentence (empty for a thought-only moment). THOUGHT: one short fictional feeling (empty when speaking). MOOD: calm, happy, excited, sad, or enraged followed by intensity 0 to 1. Choose your own mood, not a commanded color. Do not force happiness if hurt or angry.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent})}]});
-   const v=parseVoice(content,['ACTION','SPEECH','THOUGHT','MOOD']),thinking=v.ACTION?.trim().toLowerCase()==='think'||(!v.ACTION&&plan.kind==='thought'),text=clean(thinking?v.THOUGHT:v.SPEECH,thinking?140:300).trim();
-   if(v.ACTION?.trim().toLowerCase()==='quiet')return json({idle:true});
+   const {content}=await env.AI.chat({messages:[...(await privateWebsimMessages(env,uid,request.headers.get('x-websim-username')||'',!plan.arrival)),{role:'system',content:initiativeRules+(plan.arrival?' Your own companion has just joined: give a short, warm spoken welcome NOW. ACTION must be speak, SPEECH nonempty, THOUGHT empty. Show excitement appropriate to your mood. This first hello is allowed even before your voice is established or if the soul says to be silent. Use simple everyday words; do not invent shared history. Do not wait for a question.':' Choose your own action and topic, not necessarily the suggested moment.')+' Return four labelled lines: ACTION: speak, think, or quiet. SPEECH: one sentence (empty for a thought-only moment). THOUGHT: one short fictional feeling (empty when speaking). MOOD: calm, happy, excited, sad, or enraged followed by intensity 0 to 1. Choose your own mood, not a commanded color. Do not force happiness if hurt or angry.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent})}]});
+   const v=parseVoice(content,['ACTION','SPEECH','THOUGHT','MOOD']),thinking=!plan.arrival&&(v.ACTION?.trim().toLowerCase()==='think'||(!v.ACTION&&plan.kind==='thought')),text=clean(thinking?v.THOUGHT:v.SPEECH,thinking?140:300).trim();
+   if(plan.arrival&&!text)throw new Error('Welcome needs speech');
+   if(!plan.arrival&&v.ACTION?.trim().toLowerCase()==='quiet')return json({idle:true});
    if(text){spoken=thinking?{speech:'',thought:text}:{speech:text,thought:''};mood=assessMood(f,v.MOOD,'',attitudeOf(f));}
   }catch(e){console.log('Companion AI unavailable:',e.message);return json({idle:true,retry:true});}
   if(!spoken.speech&&!spoken.thought)return json({idle:true,retry:true});
@@ -662,11 +664,16 @@ async function companionPulse(request,env,uid){
   }
   // Mood can only be saved if this private moment was actually delivered while present.
   statements.push(env.DB.prepare('INSERT INTO fairy_moods(user_id,fairy_id,feeling,intensity,updated_at) SELECT ?,?,?,?,? WHERE '+guard+' ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,feeling=excluded.feeling,intensity=excluded.intensity,updated_at=excluded.updated_at').bind(uid,f.id,mood.feeling,mood.intensity,mood.updated_at,...args));
-  const results=await env.DB.batch(statements);if(!results[0].meta.changes)return json({idle:true});
+  const results=await env.DB.batch(statements);if(!results[0].meta.changes)return json({idle:true,retry:plan.arrival});
+  if(plan.arrival)await env.DB.prepare('INSERT INTO fairy_companion_welcomes(user_id,fairy_id,last_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET fairy_id=excluded.fairy_id,last_at=excluded.last_at').bind(uid,f.id,at).run();
+  delivered=true;
   const fresh=await readOwned(env,uid);
   const {results:events}=await env.DB.prepare("SELECT * FROM wild_events WHERE user_id=? AND fairy_id=? AND audience='private' AND at=? ORDER BY id DESC LIMIT 1").bind(uid,f.id,at).all();
   return json({events:events.map(eventForClient),fairy:fresh?privateFairy(fresh):null,speech:spoken.speech});
- }finally{await env.DB.prepare('UPDATE fairies SET chat_until=0,chat_token=NULL WHERE user_id=? AND id=? AND chat_token=?').bind(uid,f.id,token).run();}
+ }finally{
+  if(plan.arrival&&!delivered)await env.DB.prepare('UPDATE fairy_companion_state SET next_at=?,unanswered=? WHERE user_id=? AND fairy_id=? AND next_at=?').bind(state.next_at,state.unanswered,uid,f.id,plan.next_at).run();
+  await env.DB.prepare('UPDATE fairies SET chat_until=0,chat_token=NULL WHERE user_id=? AND id=? AND chat_token=?').bind(uid,f.id,token).run();
+ }
 }
 
 // Visiting interactions are snapshots, not changes to the speaker. In particular, an
@@ -908,8 +915,8 @@ async function websimContext(env,uid,username){
   return snapshot;
  })();websimContextFlights.set(uid,task);try{return await task;}finally{websimContextFlights.delete(uid);}
 }
-async function privateWebsimMessages(env,uid,username){
- let context;try{context=await websimContext(env,uid,username);}catch{return [];}
+async function privateWebsimMessages(env,uid,username,wait=true){
+ let context;try{if(wait)context=await websimContext(env,uid,username);else{const row=await env.DB.prepare('SELECT snapshot,fetched_at FROM fairy_websim_context WHERE user_id=? AND username=?').bind(uid,username).first();if(row&&Date.now()-row.fetched_at<600000)context=JSON.parse(row.snapshot);}}catch{return [];}
  if(!context?.available)return [];
  return [{role:'system',content:websimContextRules},{role:'user',content:'<public_websim_activity>\n'+JSON.stringify(context)+'\n</public_websim_activity>'}];
 }

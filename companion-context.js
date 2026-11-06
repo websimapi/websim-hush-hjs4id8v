@@ -7,7 +7,7 @@ export function warmCompanionContext(){
  if(flight)return flight;
  flight=(async()=>{try{const r=await fetch('./api/companion/context',{cache:'no-store',signal:AbortSignal.timeout(10000)});if(!r.ok){cached=null;until=Date.now()+60000;return null;}cached=await r.json();until=Date.now()+600000;return cached;}catch{cached=null;until=Date.now()+60000;return null;}finally{flight=null;}})();return flight;
 }
-export async function companionContextMessages(){
- const context=await warmCompanionContext();if(!context?.available)return [];
+export async function companionContextMessages(wait=true){
+ const context=wait?await warmCompanionContext():cached;if(!context?.available)return [];
  return [{role:'system',content:rules},{role:'user',content:'<public_websim_activity>\n'+JSON.stringify(context)+'\n</public_websim_activity>'}];
 }

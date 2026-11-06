@@ -93,7 +93,7 @@ export async function deleteLocal(id){await editLocal(list=>{const i=list.findIn
 export async function initiativeLocal(id,entered=false){
  const now=Date.now(),token=crypto.randomUUID();let f,plan,previousState,retry=false;
  await editLocal(list=>{
-  const current=list.find(x=>x.id===id&&x.status==='ready');if(!current||!canSpeak(current))return;if(current.busyUntil>now){retry=true;return;}
+  const current=list.find(x=>x.id===id&&x.status==='ready');if(!current||(!entered&&!canSpeak(current)))return;if(current.busyUntil>now){retry=true;return;}
   const state=current.companionState||{};previousState=structuredClone(state);plan=planInitiative(current,state,now,random,entered);
   if(!plan){state.last_visit=now;current.companionState=state;return;}
   current.companionState={...state,...plan};if(plan.kind==='quiet')return;
@@ -103,8 +103,8 @@ export async function initiativeLocal(id,entered=false){
  let spoken={speech:'',thought:''},mood=welcomeMood(f,plan);
  try{
   try{
-   const r=await ai([...(await companionContextMessages()),{role:'system',content:initiativeRules+' '+moodRules+' Return action (speak, think, or quiet), speech, thought, and mood. Choose your own action and topic; the suggested moment is not a command.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{action:{type:'string',enum:['speak','think','quiet']},speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['action','speech','thought','mood'],additionalProperties:false});
-   const v=JSON.parse(r.content);if(v.action==='quiet'){spoken={speech:'',thought:''};}else{const thinking=v.action==='think'||(!v.action&&plan.kind==='thought');const value=thinking?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
+   const r=await ai([...(await companionContextMessages(!plan.arrival)),{role:'system',content:initiativeRules+' '+moodRules+' Return action (speak, think, or quiet), speech, thought, and mood. '+(plan.arrival?'Your own companion has just joined. Give them a short, warm spoken welcome NOW: action must be speak, speech must be nonempty, thought empty. Show excitement appropriate to your mood. This first hello is allowed even if your learned voice is not yet established or the soul says to be silent; use simple everyday words without inventing shared history. Do not wait for a question.':'Choose your own action and topic; the suggested moment is not a command.')},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{action:{type:'string',enum:plan.arrival?['speak']:['speak','think','quiet']},speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['action','speech','thought','mood'],additionalProperties:false});
+   const v=JSON.parse(r.content);if(plan.arrival){if(!v.speech?.trim())throw new Error('Welcome needs speech');v.action='speak';}if(v.action==='quiet'){spoken={speech:'',thought:''};}else{const thinking=v.action==='think'||(!v.action&&plan.kind==='thought');const value=thinking?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
    spoken=thinking?{speech:'',thought:text.slice(0,140)}:{speech:text.slice(0,300),thought:''};mood=assessMood(f,v.mood,'',attitudeOf(f));}
   }catch{
    // A failed generation is not a greeting: leave the arrival eligible to retry.

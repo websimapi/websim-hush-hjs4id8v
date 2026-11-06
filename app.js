@@ -36,7 +36,7 @@ function enterWorld(f){
  if(mode==='offline'&&owns(f.id))activeId=f.id;
  world.setTitle(false);drawWorld();if(mode==='offline')world.applySnapshot(offlinePoses(locals));else realtime.connect();
  world.focus(f.id);world.follow(f.id);
- entryPending=true;const visit=++initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},1200);
+ entryPending=true;const visit=++initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},1200);setTimeout(ambientMoment,9000);
 }
 function showTitle(){
  if(transferring)return;initiativeSession++;atTitle=true;document.body.classList.add('at-title');titleUI.closeMenu();$('data-modal').close();closeConversation();realtime.close();conductor=false;
@@ -121,18 +121,15 @@ async function generate(){
  }catch(e){error('data-error',e.message);notice(e.message);}finally{generationBusy=false;drawWorld();updatePanel();}
 }
 function openConversation(f){
- $('hover-label').hidden=true;if(!owns(f.id)){notice(f.name+' listens to their own companion.');return;}
+ $('hover-label').hidden=true;if(!owns(f.id)&&mode!=='online')return;
  if(mode==='offline'){activeId=f.id;drawWorld();updatePanel();}
  selected=f.id;world.follow(f.id);$('dialogue').hidden=false;$('dialogue-name').textContent=f.name;error('chat-error','');
- const history=mode==='offline'?f.history||[]:me.history||[],last=[...history].reverse().find(m=>m.role==='assistant');
- const greeting=f.soul_md?.match(/## First words\n([^]*?)(?:\n\n##|$)/)?.[1]?.trim();
- if(last?.content||greeting)bubbles.add([{id:'recall-'+f.id,fairy_id:f.id,kind:'speech',text:last?.content||greeting,audience:'private',at:Date.now(),expires:Date.now()+25000}]);
  $('chat-input').disabled=chatBusy;$('send').disabled=chatBusy;if(!chatBusy)setTimeout(()=>$('chat-input').focus({preventScroll:true}),80);
 }
 world.setAnchorCallback(()=>{if(atTitle){titleUI.update();return;}bubbles.update();if($('dialogue').hidden||!selected)return;const p=world.project(selected,-1.04);if(!p){closeConversation();return;}const width=$('dialogue').offsetWidth,height=$('dialogue').offsetHeight,h=window.visualViewport?.height||innerHeight;$('dialogue').style.visibility=p.visible?'visible':'hidden';$('dialogue').style.left=Math.max(width/2+14,Math.min(innerWidth-width/2-14,p.x))+'px';$('dialogue').style.top=Math.max(14,Math.min(h-height-14,p.y))+'px';});
 $('chat-form').onsubmit=async e=>{
- e.preventDefault();const text=$('chat-input').value.trim();if(!text||chatBusy||!owns(selected))return;const id=selected,origin=mode;chatBusy=true;$('chat-input').value='';$('chat-input').disabled=true;$('send').disabled=true;error('chat-error','');bubbles.listening(id,true);updatePanel();
- try{const result=origin==='offline'?await chatLocal(id,text):await api('chat','POST',{text});if(origin==='offline'){await refreshLocal();if(!result.usedAI)$('dialogue-name').textContent=(companion()?.name||'Fairy')+' · local reply';}else if(me.fairy?.id===id){me.history.push({role:'user',content:text},{role:'assistant',content:result.reply});me.fairy.memory_md=result.memory_md;me.fairy.attitude=result.attitude;me.fairy.mood=result.mood;const found=worldFairies.find(f=>f.id===id);if(found){found.attitude=result.attitude;found.mood=result.mood;}realtime.refresh();updatePanel();}if(mode===origin)bubbles.add(result.events||[]);
+ e.preventDefault();const text=$('chat-input').value.trim();if(!text||chatBusy||(!owns(selected)&&mode!=='online'))return;const id=selected,origin=mode,visiting=mode==='online'&&!owns(selected);chatBusy=true;$('chat-input').value='';$('chat-input').disabled=true;$('send').disabled=true;error('chat-error','');bubbles.listening(id,true);updatePanel();
+ try{const result=origin==='offline'?await chatLocal(id,text):visiting?await api('wild/reply','POST',{fairy_id:id,text}):await api('chat','POST',{text});if(origin==='offline'){await refreshLocal();if(!result.usedAI)$('dialogue-name').textContent=(companion()?.name||'Fairy')+' · local reply';}else if(!visiting&&me.fairy?.id===id){me.history.push({role:'user',content:text},{role:'assistant',content:result.reply});me.fairy.memory_md=result.memory_md;me.fairy.attitude=result.attitude;me.fairy.mood=result.mood;const found=worldFairies.find(f=>f.id===id);if(found){found.attitude=result.attitude;found.mood=result.mood;}realtime.refresh();updatePanel();}if(mode===origin)bubbles.add(result.events||[]);
  }catch(e){if(selected===id){error('chat-error',e.message);$('chat-input').value=text;}}
  finally{chatBusy=false;bubbles.listening(id,false);$('chat-input').disabled=false;$('send').disabled=false;updatePanel();if(selected===id&&!$('dialogue').hidden)$('chat-input').focus({preventScroll:true});}
 };
@@ -211,8 +208,19 @@ async function companionMoment(){
   bubbles.add(result.events||[]);
  }catch(e){console.warn('Fairy initiative:',e.message);}finally{initiativeBusy=false;}
 }
-setInterval(companionMoment,15000);
+setInterval(companionMoment,7000);
 addEventListener('visibilitychange',()=>{
  if(document.hidden){if(mode==='online')realtime.close();return;}
  if(!atTitle){entryPending=true;if(mode==='online')realtime.connect();const visit=initiativeSession;setTimeout(()=>{if(visit===initiativeSession)companionMoment();},2200);}
 });
+
+let ambientBusy=false,ambientNext=0;
+async function ambientMoment(){
+ if(atTitle||mode!=='online'||document.hidden||chatBusy||initiativeBusy||ambientBusy||generationBusy||transferring||changing||Date.now()<ambientNext||$('data-modal').open)return;
+ if(!$('dialogue').hidden&&$('chat-input').value.trim())return;
+ const visible=worldFairies.filter(f=>{const p=world.project(f.id,0);return p?.visible&&p.distance<35;}).map(f=>f.id);
+ if(!visible.some(id=>id!==me.fairy?.id))return;
+ ambientBusy=true;ambientNext=Date.now()+40000;const visit=initiativeSession;
+ try{const result=await api('wild/ambient','POST',{visible});if(!atTitle&&mode==='online'&&visit===initiativeSession&&!document.hidden){if(result.t)bubbles.syncClock(result.t);bubbles.add(result.events||[]);}}catch(e){console.warn('World fairy moment:',e.message);}finally{ambientBusy=false;}
+}
+setInterval(ambientMoment,7000);

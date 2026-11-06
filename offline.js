@@ -121,16 +121,16 @@ export async function initiativeLocal(id,entered=false){
   try{
    // Arrival is immediate; later spontaneous moments use AI without delaying hello.
    if(plan.arrival)throw new Error('Immediate welcome');
-   const r=await ai([{role:'system',content:initiativeRules+' '+moodRules+' Return speech (empty for thought-only), thought (empty if speaking), and mood.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['speech','thought','mood'],additionalProperties:false});
-   const v=JSON.parse(r.content);const value=plan.kind==='thought'?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
-   spoken=plan.kind==='thought'?{speech:'',thought:text.slice(0,140)}:{speech:text.slice(0,300),thought:''};mood=assessMood(f,v.mood,'',attitudeOf(f));
+   const r=await ai([{role:'system',content:initiativeRules+' '+moodRules+' Return action (speak, think, or quiet), speech, thought, and mood. Choose your own action and topic; the suggested moment is not a command.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{action:{type:'string',enum:['speak','think','quiet']},speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['action','speech','thought','mood'],additionalProperties:false});
+   const v=JSON.parse(r.content);if(v.action==='quiet'){spoken={speech:'',thought:''};}else{const thinking=v.action==='think'||(!v.action&&plan.kind==='thought');const value=thinking?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
+   spoken=thinking?{speech:'',thought:text.slice(0,140)}:{speech:text.slice(0,300),thought:''};mood=assessMood(f,v.mood,'',attitudeOf(f));}
   }catch{}
   let saved=false;
   await editLocal(list=>{const current=list.find(x=>x.id===id);if(current?.busy!==token)return;
    current.mood=mood;if(spoken.speech){current.history.push({role:'assistant',content:spoken.speech,created_at:Date.now()});current.memory_md=(current.memory_md+'\n\n## A moment with my companion\nI said: '+spoken.speech).slice(-48000);}
    current.busy=null;current.busyUntil=0;saved=true;
   });
-  const at=Date.now(),events=saved?[{id:'initiative-'+token,fairy_id:id,kind:spoken.speech?'speech':'thought',text:spoken.speech||spoken.thought,audience:'private',at,expires:at+(spoken.speech?22000:10000)}]:[];
+  const at=Date.now(),events=saved&&(spoken.speech||spoken.thought)?[{id:'initiative-'+token,fairy_id:id,kind:spoken.speech?'speech':'thought',text:spoken.speech||spoken.thought,audience:'private',at,expires:at+(spoken.speech?22000:10000)}]:[];
   return {events};
  }finally{await editLocal(list=>{const c=list.find(x=>x.id===id);if(c?.busy===token){c.busy=null;c.busyUntil=0;}});}
 }

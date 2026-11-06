@@ -9,6 +9,7 @@ import {describeMood} from './mood.js';
 import {physicalDetails} from './physical.js';
 import {canSpeak} from './language.js';
 import {createActivity} from './activity.js';
+import {warmCompanionContext} from './companion-context.js';
 const activity=createActivity();
 const $=id=>document.getElementById(id);
 // Every visit starts in the private world; joining the social world is explicit.
@@ -35,7 +36,7 @@ function showFairyMenu(f,event){
 function onFairySelect(f){if(atTitle)enterWorld(f);else openConversation(f);}
 function enterWorld(f){
  if(!f||f.status==='creating')return;if(f.status==='pending-transfer'){resumeFromPicker(f.id);return;}
- activity.start();atTitle=false;document.body.classList.remove('at-title');titleUI.closeMenu();$('data-modal').close();closeConversation();inspectId=null;
+ activity.start();warmCompanionContext();atTitle=false;document.body.classList.remove('at-title');titleUI.closeMenu();$('data-modal').close();closeConversation();inspectId=null;
  if(mode==='offline'&&owns(f.id))activeId=f.id;
  world.setTitle(false);drawWorld();if(mode==='offline')world.applySnapshot(offlinePoses(locals));else realtime.connect();
  world.focus(f.id);world.follow(f.id);
@@ -107,7 +108,7 @@ function updatePanel(){
  }
  $('soul-files').hidden=!f||!owns(f.id);$('file-content').textContent=f?.[currentFile]||'';
  $('delete-start').hidden=!f||!owns(f.id);
- $('privacy-note').textContent=offline?'Only saved in this browser. Speech and thoughts need an AI connection.':'Private conversations and files are visible only to you and the page creator.';
+ $('privacy-note').textContent=(offline?'Fairy files stay in this browser. Speech and thoughts need an AI connection.':'Private conversations and files are visible only to you and the page creator.')+' When signed in, your published projects, public comments and follows can inform private conversations. A server-side activity sample refreshes every 10 minutes; drafts and private messages are not accessed.';
  $('rebirth').hidden=true;
  $('rebirth').disabled=generationBusy||transferring;$('rebirth').textContent=offline?'Generate fairy · '+locals.length+'/3':'Generate my online fairy';
  $('transfer-start').hidden=offline;$('transfer-start').disabled=locals.length>=3||transferring;$('transfer-start').textContent=locals.length>=3?'Offline slots full':'Move offline instead';

@@ -1,5 +1,5 @@
-const CACHE='hush-device-shell-v2';
-const FILES=['./','index.html','app.js','style.css','scene.js','fairy-effects.js','bubbles.js','multiplayer.js','offline.js','temperament.js','admin.js','title-ui.js'];
+const CACHE='hush-device-shell-v3';
+const FILES=['./','index.html','app.js','style.css','scene.js','fairy-effects.js','bubbles.js','multiplayer.js','offline.js','temperament.js','admin.js','title-ui.js','mood.js'];
 const ROOTS=['https://esm.sh/three@0.170.0',...['controls/OrbitControls','postprocessing/EffectComposer','postprocessing/RenderPass','postprocessing/UnrealBloomPass','postprocessing/OutputPass'].map(p=>'https://esm.sh/three@0.170.0/examples/jsm/'+p+'.js')];
 self.addEventListener('install',event=>event.waitUntil((async()=>{
  const cache=await caches.open(CACHE);await Promise.all(FILES.map(async path=>{try{const response=await fetch(new URL(path,self.location),{cache:'reload'});if(response.ok)await cache.put(new URL(path,self.location),response);}catch{}}));

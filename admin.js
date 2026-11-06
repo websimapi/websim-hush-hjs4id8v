@@ -16,7 +16,7 @@ async function adminRead(uid){
   const data=await api('admin/read','POST',{user_id:uid});adminTarget=uid;
   const f=data.fairy,form=$('admin-form');form.hidden=false;form.elements.name.value=f.name||'';form.elements.soul_md.value=f.soul_md;form.elements.memory_md.value=f.memory_md;form.elements.appearance.value=JSON.stringify(f.appearance,null,2);
   form.querySelector('.admin-target').textContent='user '+uid+' · fairy '+f.id+' · '+f.status;
-  $('admin-signals').textContent=JSON.stringify({birth:f.signals,attitude:f.attitude},null,2);$('admin-history').textContent=data.history.map(m=>m.role+': '+m.content).join('\n\n');$('admin-reset-word').value='';$('admin-reset').disabled=true;$('admin-feedback').textContent='';
+  $('admin-signals').textContent=JSON.stringify({birth:f.signals,attitude:f.attitude,mood:f.mood},null,2);$('admin-history').textContent=data.history.map(m=>m.role+': '+m.content).join('\n\n');$('admin-reset-word').value='';$('admin-reset').disabled=true;$('admin-feedback').textContent='';
  }catch(e){$('admin-feedback').textContent=e.message;}
 }
 $('admin-open').onclick=openAdmin;$('admin-close').onclick=()=>{$('admin-panel').hidden=true;};$('admin-more').onclick=()=>adminList(true).catch(e=>{$('admin-feedback').textContent=e.message;});

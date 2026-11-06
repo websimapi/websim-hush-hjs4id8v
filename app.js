@@ -5,6 +5,7 @@ import {localFairies,editLocal,generateLocal,chatLocal,encounterLocal,offlinePos
 import {describeAttitude} from './temperament.js';
 import {setupAdmin} from './admin.js';
 import {createTitleUI} from './title-ui.js';
+import {describeMood} from './mood.js';
 const $=id=>document.getElementById(id);
 // Every visit starts in the private world; joining the social world is explicit.
 let mode='offline',atTitle=true,inspectId=null;
@@ -85,7 +86,7 @@ function updatePanel(){
  $('mode-offline').classList.toggle('active',offline);$('mode-online').classList.toggle('active',!offline);$('mode-offline').setAttribute('aria-selected',String(offline));$('mode-online').setAttribute('aria-selected',String(!offline));
  $('data-name').textContent=f?f.name:'Details';
  $('account-link').replaceChildren();if(!offline&&(f?.username||me.username))$('account-link').append(profile(f?.username||me.username));
- $('data-status').textContent=f?describeAttitude(f):'';
+ $('data-status').textContent=f?describeAttitude(f)+' · feeling '+describeMood(f):'';
  $('storage-note').textContent=offline?'Souls, memories, attitudes and conversations are saved in IndexedDB on this device. Connected AI can process dialogue; without it, replies are local. Clearing browser storage erases these fairies.':'Online souls and memories are saved on the authoritative server. Offline fairies cannot be brought here.';
  $('slot-list').replaceChildren();
  for(const local of locals){
@@ -127,7 +128,7 @@ function openConversation(f){
 world.setAnchorCallback(()=>{if(atTitle){titleUI.update();return;}bubbles.update();if($('dialogue').hidden||!selected)return;const p=world.project(selected,-1.04);if(!p){closeConversation();return;}const width=$('dialogue').offsetWidth,height=$('dialogue').offsetHeight,h=window.visualViewport?.height||innerHeight;$('dialogue').style.visibility=p.visible?'visible':'hidden';$('dialogue').style.left=Math.max(width/2+14,Math.min(innerWidth-width/2-14,p.x))+'px';$('dialogue').style.top=Math.max(14,Math.min(h-height-14,p.y))+'px';});
 $('chat-form').onsubmit=async e=>{
  e.preventDefault();const text=$('chat-input').value.trim();if(!text||chatBusy||!owns(selected))return;const id=selected,origin=mode;chatBusy=true;$('chat-input').value='';$('chat-input').disabled=true;$('send').disabled=true;error('chat-error','');bubbles.listening(id,true);updatePanel();
- try{const result=origin==='offline'?await chatLocal(id,text):await api('chat','POST',{text});if(origin==='offline'){await refreshLocal();if(!result.usedAI)$('dialogue-name').textContent=(companion()?.name||'Fairy')+' · local reply';}else if(me.fairy?.id===id){me.history.push({role:'user',content:text},{role:'assistant',content:result.reply});me.fairy.memory_md=result.memory_md;me.fairy.attitude=result.attitude;const found=worldFairies.find(f=>f.id===id);if(found)found.attitude=result.attitude;realtime.refresh();updatePanel();}if(mode===origin)bubbles.add(result.events||[]);
+ try{const result=origin==='offline'?await chatLocal(id,text):await api('chat','POST',{text});if(origin==='offline'){await refreshLocal();if(!result.usedAI)$('dialogue-name').textContent=(companion()?.name||'Fairy')+' · local reply';}else if(me.fairy?.id===id){me.history.push({role:'user',content:text},{role:'assistant',content:result.reply});me.fairy.memory_md=result.memory_md;me.fairy.attitude=result.attitude;me.fairy.mood=result.mood;const found=worldFairies.find(f=>f.id===id);if(found){found.attitude=result.attitude;found.mood=result.mood;}realtime.refresh();updatePanel();}if(mode===origin)bubbles.add(result.events||[]);
  }catch(e){if(selected===id){error('chat-error',e.message);$('chat-input').value=text;}}
  finally{chatBusy=false;bubbles.listening(id,false);$('chat-input').disabled=false;$('send').disabled=false;updatePanel();if(selected===id&&!$('dialogue').hidden)$('chat-input').focus({preventScroll:true});}
 };

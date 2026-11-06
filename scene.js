@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {moodVisual} from './mood.js';
 import {livingWool,addBodyAurora,wingAurora} from './fairy-effects.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
@@ -54,12 +55,13 @@ export function createWorld(host,{onSelect,onHover,onContext}){
   const hue=a.hue, sat=a.saturation,light=a.lightness;
   const glowPhase=(a.seed%10000)/10000*Math.PI*2;
   const baseColor=new THREE.Color().setHSL(hue,sat,light);
+  const mood={glow:{value:1},tint:{value:0},color:{value:new THREE.Color('#d3c6e6')},activity:0};
   const bodyMat=low?new THREE.MeshBasicMaterial({color:baseColor}):new THREE.MeshStandardMaterial({color:baseColor,roughness:1,emissive:baseColor,emissiveIntensity:.12});
-  if(!low)livingWool(bodyMat,{time:effectTime,phase:glowPhase,color:baseColor,reduced});
+  if(!low)livingWool(bodyMat,{time:effectTime,phase:glowPhase,color:baseColor,mood,reduced});
   const body=new THREE.Mesh(baseGeo,bodyMat);body.userData.fairy=data.id;group.add(body);hits.push(body);
   const count=low?(hero?2800:200):titleView?(innerWidth<700?4500:7000):hero?12000:index<28?1300:70;
   const furMat=low?new THREE.MeshBasicMaterial({color:'#ffffff'}):new THREE.MeshStandardMaterial({color:'#ffffff',roughness:1,metalness:0,emissive:baseColor,emissiveIntensity:.18});
-  if(!low)livingWool(furMat,{time:effectTime,phase:glowPhase,color:baseColor,fur:true,reduced});
+  if(!low)livingWool(furMat,{time:effectTime,phase:glowPhase,color:baseColor,mood,fur:true,reduced});
   const fur=new THREE.InstancedMesh(tuftGeometry,furMat,count);fur.frustumCulled=false;
   const color=new THREE.Color();
   for(let i=0;i<count;i++){
@@ -79,17 +81,17 @@ export function createWorld(host,{onSelect,onHover,onContext}){
    const hinge=new THREE.Group();hinge.position.set(side*(top?.81:.79),top?.25:-.16,-.1);
    hinge.rotation.z=side*(top?-.78:-2.12);
    const wingMat=low?new THREE.MeshBasicMaterial({color:'#fffaff',side:THREE.DoubleSide,transparent:true,opacity:.95}):new THREE.MeshStandardMaterial({color:'#fffaff',emissive:'#fff5ff',emissiveIntensity:2.4,side:THREE.DoubleSide,roughness:.4,transparent:true,opacity:.85,depthWrite:false});
-   if(!low)hinge.add(wingAurora(wingGeometry(len*1.08,width*3.5),{time:effectTime,phase:glowPhase+upper+side,color:baseColor,reduced}));
+   if(!low)hinge.add(wingAurora(wingGeometry(len*1.08,width*3.5),{time:effectTime,phase:glowPhase+upper+side,color:baseColor,mood,reduced}));
    const wing=new THREE.Mesh(wingGeometry(len,width),wingMat);wing.renderOrder=4;hinge.add(wing);
    const pts=[];for(let j=0;j<16;j++){const t=j/15;pts.push(new THREE.Vector3(Math.sin(t*Math.PI)*.075,len*t,Math.sin(t*Math.PI)*.04+.006));}
    const vein=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),20,.0025,3,false),new THREE.MeshBasicMaterial({color:'#eadff3',transparent:true,opacity:.38}));hinge.add(vein);
    group.add(hinge);wings.push({hinge,base:hinge.rotation.z,side,phase:upper*.9});
   }
-  if(!low)addBodyAurora(group,{time:effectTime,phase:glowPhase,color:baseColor,reduced});
+  if(!low)addBodyAurora(group,{time:effectTime,phase:glowPhase,color:baseColor,mood,reduced});
   const initialPose=frames.get(data.id)?.at(-1)||data.pose;
   if(initialPose)group.position.set(initialPose.x,initialPose.y,initialPose.z);else group.position.set(a.x,.2,a.z);
   scene.add(group);
-  return {data,group,wings,body,fur,hero,phase:random()*Math.PI*2,base:new THREE.Vector3(data.pose?.x??a.x,data.pose?.y??.2,data.pose?.z??a.z),hover:0};
+  return {data,group,wings,body,fur,hero,mood,baseColor,phase:random()*Math.PI*2,base:new THREE.Vector3(data.pose?.x??a.x,data.pose?.y??.2,data.pose?.z??a.z),hover:0};
  }
  function clearFairy(f){
   scene.remove(f.group);const at=hits.indexOf(f.body);if(at>=0)hits.splice(at,1);
@@ -145,8 +147,18 @@ export function createWorld(host,{onSelect,onHover,onContext}){
   requestAnimationFrame(animate);
   const t=Date.now()/1000;
   effectTime.value=performance.now()/1000;
+  const moodBlend=1-Math.exp(-Math.min(.1,(now-(animate.previous||now))/1000)/2.5);animate.previous=now;
   // Only server snapshots move a fairy. Interpolate 220 ms behind the room.
   for(const f of fairies.values()){
+   const visual=moodVisual(f.data),m=f.mood;
+   m.glow.value=THREE.MathUtils.lerp(m.glow.value,visual.glow,moodBlend);
+   m.tint.value=THREE.MathUtils.lerp(m.tint.value,visual.tint,moodBlend);
+   m.color.value.lerp(new THREE.Color(visual.color),moodBlend);
+   m.activity=THREE.MathUtils.lerp(m.activity,visual.activity,moodBlend);
+   const pulse=reduced?1:1+Math.sin(t*(1.2+m.activity*1.8)+f.phase)*(.018+m.activity*.045);
+   if(!low){f.body.material.emissiveIntensity=.12*m.glow.value*pulse;f.fur.material.emissiveIntensity=.18*m.glow.value*pulse;}
+   else{f.fur.material.color.copy(new THREE.Color('#ffffff')).lerp(m.color.value,m.tint.value*.38).multiplyScalar(.76+.24*m.glow.value);}
+   for(const wing of f.wings){const core=wing.hinge.children.find(o=>o.isMesh&&o.renderOrder===4);if(core&&!low)core.material.emissiveIntensity=2.4*(.7+.3*m.glow.value)*pulse;}
    const timeline=frames.get(f.data.id),renderAt=performance.now()-220;
    if(!titleView&&timeline?.length){
     let left=timeline[0],right=timeline[timeline.length-1];

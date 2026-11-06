@@ -11,13 +11,14 @@ vec3 auroraPalette(float t, vec3 heart) {
 }
 `;
 
-export function livingWool(material,{time,phase,color,fur=false,reduced=false}) {
+export function livingWool(material,{time,phase,color,mood,fur=false,reduced=false}) {
  material.onBeforeCompile=shader=>{
+  shader.uniforms.uMoodGlow=mood.glow;shader.uniforms.uMoodTint=mood.tint;shader.uniforms.uMoodColor=mood.color;
   shader.uniforms.uFairyTime=time;
   shader.uniforms.uFairyPhase={value:phase};
   shader.uniforms.uFairyHeart={value:color};
   shader.uniforms.uFairyMotion={value:reduced?0:1};
-  const common=`uniform float uFairyTime;uniform float uFairyPhase;uniform vec3 uFairyHeart;uniform float uFairyMotion;varying vec3 vFairyRoot;varying float vFairyTip;`;
+  const common=`uniform float uMoodGlow,uMoodTint;uniform vec3 uMoodColor;uniform float uFairyTime;uniform float uFairyPhase;uniform vec3 uFairyHeart;uniform float uFairyMotion;varying vec3 vFairyRoot;varying float vFairyTip;`;
   shader.vertexShader=common+'\n'+shader.vertexShader;
   shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`
    #include <begin_vertex>
@@ -36,21 +37,22 @@ export function livingWool(material,{time,phase,color,fur=false,reduced=false}) 
     transformed.y*=1.0+wave*.15*vFairyTip*uFairyMotion;
    `:''));
   shader.fragmentShader=common+spectrum+shader.fragmentShader;
+  if(fur)shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,uMoodColor,uMoodTint*.38);');
   shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>',`
    #include <emissivemap_fragment>
    float fairyFlow=dot(vFairyRoot,vec3(3.4,4.8,2.2))+uFairyTime*.65*uFairyMotion+uFairyPhase;
    float fairyBand=pow(.5+.5*sin(fairyFlow),3.0);
-   vec3 fairyLight=auroraPalette(fairyFlow*.52,uFairyHeart);
-   totalEmissiveRadiance+=fairyLight*(`+(fur?'0.20+fairyBand*.75*(.3+.7*vFairyTip)':'0.16+fairyBand*.27')+`);
+   vec3 fairyLight=mix(auroraPalette(fairyFlow*.52,uFairyHeart),uMoodColor,uMoodTint*.70);
+   totalEmissiveRadiance+=fairyLight*(`+(fur?'0.20+fairyBand*.75*(.3+.7*vFairyTip)':'0.16+fairyBand*.27')+`)*uMoodGlow;
   `);
  };
- material.customProgramCacheKey=()=>fur?'living-wool-v1':'living-heart-v1';
+ material.customProgramCacheKey=()=>fur?'living-wool-v2':'living-heart-v2';
 }
 
-function auraMaterial({time,phase,color,layer=0,wing=false,reduced=false}) {
+function auraMaterial({time,phase,color,mood,layer=0,wing=false,reduced=false}) {
  return new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,side:THREE.FrontSide,toneMapped:false,
-  uniforms:{uTime:time,uPhase:{value:phase},uHeart:{value:color},uLayer:{value:layer},uMotion:{value:reduced?0:1}},
+  uniforms:{uMoodGlow:mood.glow,uMoodTint:mood.tint,uMoodColor:mood.color,uTime:time,uPhase:{value:phase},uHeart:{value:color},uLayer:{value:layer},uMotion:{value:reduced?0:1}},
   vertexShader: `
    uniform float uTime,uPhase,uLayer,uMotion;
    varying vec3 vLocal,vNormal,vView;varying vec2 vUv;
@@ -71,7 +73,7 @@ function auraMaterial({time,phase,color,layer=0,wing=false,reduced=false}) {
    }
   `,
   fragmentShader: `
-   uniform float uTime,uPhase,uLayer,uMotion;uniform vec3 uHeart;
+   uniform float uTime,uPhase,uLayer,uMotion,uMoodGlow,uMoodTint;uniform vec3 uHeart,uMoodColor;
    varying vec3 vLocal,vNormal,vView;varying vec2 vUv;
    `+spectrum+`
    void main(){
@@ -94,7 +96,8 @@ function auraMaterial({time,phase,color,layer=0,wing=false,reduced=false}) {
      vec3 color=auroraPalette(folded*.38+latitude*2.5+uLayer,uHeart);
      float alpha=edge*(.14+curtain*.55)*threads*(uLayer<.5?1.0:.66);
     `)+`
-    gl_FragColor=vec4(color*1.13,alpha);
+    color=mix(color,uMoodColor,uMoodTint*.75);
+    gl_FragColor=vec4(color*1.13*uMoodGlow,alpha*min(1.35,uMoodGlow));
    }
   `
  });

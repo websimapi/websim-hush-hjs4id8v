@@ -1,4 +1,5 @@
 import {createSpeechQueue} from './speech-queue.js';
+import {canSpeak} from './language.js';
 export function createBubbles(world,host,getFairies){
  const queue=createSpeechQueue(),nodes=new Map();let offset=0,clockSet=false;
  function syncClock(t){const sample=t-Date.now();offset=clockSet?offset*.9+sample*.1:sample;clockSet=true;}
@@ -8,6 +9,7 @@ export function createBubbles(world,host,getFairies){
  function clear(id){queue.clear(id);nodes.get(id)?.remove();nodes.delete(id);}
  function update(){
   const fairies=new Map(getFairies().map(f=>[f.id,f])),chosen=queue.current(Date.now()+offset);
+  for(const [id,f] of fairies)if(!canSpeak(f)){queue.clear(id);chosen.delete(id);}
   for(const [id,node] of nodes)if(!chosen.has(id)){node.remove();nodes.delete(id);}
   for(const [id,e] of chosen){
    const p=world.project(id,1.12),f=fairies.get(id);let node=nodes.get(id);

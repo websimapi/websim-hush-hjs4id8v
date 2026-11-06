@@ -7,6 +7,7 @@ import {setupAdmin} from './admin.js';
 import {createTitleUI} from './title-ui.js';
 import {describeMood} from './mood.js';
 import {physicalDetails} from './physical.js';
+import {canSpeak} from './language.js';
 const $=id=>document.getElementById(id);
 // Every visit starts in the private world; joining the social world is explicit.
 let mode='offline',atTitle=true,inspectId=null,initiativeBusy=false,initiativeSession=0,entryPending=false,digestBusy=false,digestPending=false,digestRetryAt=0;
@@ -90,7 +91,7 @@ function updatePanel(){
  const traits=$('physical-details');traits.hidden=!f;traits.replaceChildren();
  for(const [label,value] of physicalDetails(f?.appearance)){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;if(label==='Mass')dd.title='Simulated fairy mass, in milligrams.';else dd.title='Relative to a typical fairy.';traits.append(dt,dd);}
  $('account-link').replaceChildren();if(!offline&&(f?.username||me.username))$('account-link').append(profile(f?.username||me.username));
- $('data-status').textContent=f?describeAttitude(f)+' · feeling '+describeMood(f):'';
+ $('data-status').textContent=f?(canSpeak(f)?describeAttitude(f)+' · feeling '+describeMood(f):'Listening · voice forming'):'';
  $('storage-note').textContent=offline?'Souls, memories, attitudes and conversations are saved in IndexedDB on this device. All speech and thoughts require an AI connection; without one, fairies stay quiet. Clearing browser storage erases these fairies.':'Online souls and memories are saved on the authoritative server. Offline fairies cannot be brought here.';
  $('slot-list').replaceChildren();
  for(const local of locals){
@@ -124,12 +125,12 @@ function openConversation(f){
  $('hover-label').hidden=true;if(!owns(f.id)&&mode!=='online')return;
  if(mode==='offline'){activeId=f.id;drawWorld();updatePanel();}
  selected=f.id;world.follow(f.id);$('dialogue').hidden=false;$('dialogue-name').textContent=f.name;error('chat-error','');
- $('chat-input').disabled=chatBusy;$('send').disabled=chatBusy;if(!chatBusy)setTimeout(()=>$('chat-input').focus({preventScroll:true}),80);
+ $('chat-input').placeholder=canSpeak(f)?'Tell me what’s on your mind…':'Speak to help me find my voice…';$('chat-input').disabled=chatBusy;$('send').disabled=chatBusy;if(!chatBusy)setTimeout(()=>$('chat-input').focus({preventScroll:true}),80);
 }
 world.setAnchorCallback(()=>{if(atTitle){titleUI.update();return;}bubbles.update();if($('dialogue').hidden||!selected)return;const p=world.project(selected,-1.04);if(!p){closeConversation();return;}const width=$('dialogue').offsetWidth,height=$('dialogue').offsetHeight,h=window.visualViewport?.height||innerHeight;$('dialogue').style.visibility=p.visible?'visible':'hidden';$('dialogue').style.left=Math.max(width/2+14,Math.min(innerWidth-width/2-14,p.x))+'px';$('dialogue').style.top=Math.max(14,Math.min(h-height-14,p.y))+'px';});
 $('chat-form').onsubmit=async e=>{
  e.preventDefault();const text=$('chat-input').value.trim();if(!text||chatBusy||(!owns(selected)&&mode!=='online'))return;const id=selected,origin=mode,visiting=mode==='online'&&!owns(selected);chatBusy=true;$('chat-input').value='';$('chat-input').disabled=true;$('send').disabled=true;error('chat-error','');bubbles.listening(id,true);updatePanel();
- try{const result=await replyWhenReady(()=>origin==='offline'?chatLocal(id,text):visiting?api('wild/reply','POST',{fairy_id:id,text}):api('chat','POST',{text}));if(origin==='offline'){await refreshLocal();}else if(!visiting&&me.fairy?.id===id){me.history.push({role:'user',content:text},{role:'assistant',content:result.reply});me.fairy.memory_md=result.memory_md;me.fairy.attitude=result.attitude;me.fairy.mood=result.mood;const found=worldFairies.find(f=>f.id===id);if(found){found.attitude=result.attitude;found.mood=result.mood;}realtime.refresh();updatePanel();}if(mode===origin)bubbles.respond(id,result.events||[]);
+ try{const result=await replyWhenReady(()=>origin==='offline'?chatLocal(id,text):visiting?api('wild/reply','POST',{fairy_id:id,text}):api('chat','POST',{text}));if(origin==='offline'){await refreshLocal();}else if(!visiting&&me.fairy?.id===id){me.history.push({role:'user',content:text},{role:'assistant',content:result.reply});me.fairy.memory_md=result.memory_md;me.fairy.soul_md=result.soul_md;me.fairy.language=result.language;me.fairy.attitude=result.attitude;me.fairy.mood=result.mood;const found=worldFairies.find(f=>f.id===id);if(found){found.attitude=result.attitude;found.mood=result.mood;found.language=result.language;}realtime.refresh();updatePanel();}if(mode===origin){bubbles.respond(id,result.events||[]);if(!result.reply&&!visiting)$('chat-input').placeholder='Listening · keep talking to help form my voice…';}
  }catch(e){if(selected===id){error('chat-error',e.message);$('chat-input').value=text;}}
  finally{chatBusy=false;bubbles.listening(id,false);$('chat-input').disabled=false;$('send').disabled=false;updatePanel();if(selected===id&&!$('dialogue').hidden)$('chat-input').focus({preventScroll:true});}
 };
@@ -193,7 +194,7 @@ boot();
 
 async function companionMoment(){
  const fairy=companion();
- if(atTitle||document.hidden||!fairy||initiativeBusy||digestBusy||chatBusy||generationBusy||transferring||changing||$('data-modal').open)return;
+ if(atTitle||document.hidden||!fairy||!canSpeak(fairy)||initiativeBusy||digestBusy||chatBusy||generationBusy||transferring||changing||$('data-modal').open)return;
  if(!$('dialogue').hidden&&$('chat-input').value.trim())return;
  initiativeBusy=true;const origin=mode,visit=initiativeSession,id=fairy.id;
  try{
@@ -218,7 +219,7 @@ let ambientBusy=false,ambientNext=0;
 async function ambientMoment(){
  if(atTitle||mode!=='online'||document.hidden||chatBusy||initiativeBusy||ambientBusy||generationBusy||transferring||changing||Date.now()<ambientNext||$('data-modal').open)return;
  if(!$('dialogue').hidden&&$('chat-input').value.trim())return;
- const visible=worldFairies.filter(f=>{const p=world.project(f.id,0);return p?.visible&&p.distance<35;}).map(f=>f.id);
+ const visible=worldFairies.filter(f=>{if(!canSpeak(f))return false;const p=world.project(f.id,0);return p?.visible&&p.distance<35;}).map(f=>f.id);
  if(!visible.some(id=>id!==me.fairy?.id))return;
  ambientBusy=true;ambientNext=Date.now()+40000;const visit=initiativeSession;
  try{const result=await api('wild/ambient','POST',{visible});if(!atTitle&&mode==='online'&&visit===initiativeSession&&!document.hidden){if(result.t)bubbles.syncClock(result.t);bubbles.add(result.events||[]);}}catch(e){console.warn('World fairy moment:',e.message);}finally{ambientBusy=false;}

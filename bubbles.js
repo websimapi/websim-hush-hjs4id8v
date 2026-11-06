@@ -4,7 +4,7 @@ export function createBubbles(world,host,getFairies,isAfk=()=>false){
  const queue=createSpeechQueue(),nodes=new Map();let offset=0,clockSet=false;
  function syncClock(t){const sample=t-Date.now();offset=clockSet?offset*.9+sample*.1:sample;clockSet=true;}
  function add(list){queue.add(list,Date.now()+offset);}
- function listening(id,value){if(value)queue.pause(id,Date.now()+offset);}
+ function listening(id,value){if(value)queue.pause(id,Date.now()+offset);else queue.resume(id);}
  function respond(id,list){queue.respond(id,list,Date.now()+offset);}
  function clear(id){queue.clear(id);nodes.get(id)?.remove();nodes.delete(id);}
  document.addEventListener('visibilitychange',()=>queue.suspend());

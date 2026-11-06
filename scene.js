@@ -94,7 +94,7 @@ export function createWorld(host,{onSelect,onHover}){
   f.group.traverse(o=>{if(o.isMesh){if(o.geometry!==baseGeo&&o.geometry!==tuftGeometry)o.geometry.dispose();if(o.material)o.material.dispose();if(o.isInstancedMesh)o.dispose();}});
  }
  function setFairies(list,id){
-  const changedOwn=ownId!==id;ownId=id;
+  const changedOwn=ownId!==id;ownId=id;if(!list.length){framed=false;focus=null;followId=null;followPrevious=null;}
   const ids=new Set(list.map(f=>f.id));
   for(const [key,f] of fairies){if(!ids.has(key)){clearFairy(f);fairies.delete(key);frames.delete(key);if(followId===key){followId=null;followPrevious=null;}}}
   list.forEach((data,i)=>{

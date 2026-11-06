@@ -152,7 +152,8 @@ export function createWorld(host,{onSelect,onHover,onContext}){
   requestAnimationFrame(animate);
   const t=Date.now()/1000;
   effectTime.value=performance.now()/1000;
-  const moodBlend=1-Math.exp(-Math.min(.1,(now-(animate.previous||now))/1000)/2.5);animate.previous=now;
+  const dt=Math.min(.1,Math.max(0,(now-(animate.previous??now))/1000));
+  const moodBlend=1-Math.exp(-dt/2.5),motionBlend=1-Math.exp(-dt*8);animate.previous=now;
   // Only server snapshots move a fairy. Interpolate 220 ms behind the room.
   for(const f of fairies.values()){
    const visual=moodVisual(f.data),m=f.mood;
@@ -169,17 +170,20 @@ export function createWorld(host,{onSelect,onHover,onContext}){
     let left=timeline[0],right=timeline[timeline.length-1];
     for(let i=1;i<timeline.length;i++)if(timeline[i].time>=renderAt){left=timeline[i-1];right=timeline[i];break;}
     const alpha=right.time===left.time?1:THREE.MathUtils.clamp((renderAt-left.time)/(right.time-left.time),0,1);
-    f.group.position.set(THREE.MathUtils.lerp(left.x,right.x,alpha),THREE.MathUtils.lerp(left.y,right.y,alpha),THREE.MathUtils.lerp(left.z,right.z,alpha));
-    f.group.rotation.z=reduced?0:THREE.MathUtils.lerp(left.turn||0,right.turn||0,alpha);
+    const target=new THREE.Vector3(THREE.MathUtils.lerp(left.x,right.x,alpha),THREE.MathUtils.lerp(left.y,right.y,alpha),THREE.MathUtils.lerp(left.z,right.z,alpha));
+    f.group.position.lerp(target,motionBlend);
+    f.group.rotation.z=reduced?0:THREE.MathUtils.lerp(f.group.rotation.z,THREE.MathUtils.lerp(left.turn||0,right.turn||0,alpha),motionBlend);
    }
    if(titleView){const slot=titleIds.indexOf(f.data.id);if(slot>=0){f.group.position.copy(titlePosition(slot,titleIds.length));f.group.position.y+=reduced?0:Math.sin(t*.7+f.phase)*.075;}}
    for(const w of f.wings){w.hinge.rotation.y=reduced?0:Math.sin(t*3.7+w.phase+f.phase)*.20*w.side;w.hinge.rotation.z=w.base+(reduced?0:Math.sin(t*2.5+f.phase)*.025*w.side);}
    if(low&&!reduced)f.fur.scale.setScalar(f.data.appearance.bodyScale*(1+Math.sin(t*1.3+f.phase)*.012));
    f.hover=THREE.MathUtils.lerp(f.hover,hovered===f.data.id?1:0,.08);f.group.scale.setScalar(1+f.hover*.018);
   }
-  if(!titleView&&focus?.target){camera.position.lerp(focus.position,.055);controls.target.lerp(focus.target,.055);if(camera.position.distanceTo(focus.position)<.015)focus=null;}
-  if(!titleView&&followId){const f=fairies.get(followId);if(f){if(followPrevious){const delta=f.group.position.clone().sub(followPrevious);camera.position.add(delta);controls.target.add(delta);}followPrevious=f.group.position.clone();}}
-  controls.update();anchorCallback();
+  if(!titleView&&focus?.target){camera.position.lerp(focus.position,1-Math.exp(-dt*3.4));controls.target.lerp(focus.target,1-Math.exp(-dt*3.4));if(camera.position.distanceTo(focus.position)<.015)focus=null;}
+  if(!titleView&&followId){const f=fairies.get(followId);if(f){if(followPrevious){const delta=f.group.position.clone().sub(followPrevious);camera.position.add(delta);controls.target.add(delta);if(focus){focus.position.add(delta);focus.target.add(delta);}}followPrevious=f.group.position.clone();}}
+  controls.update();
+  // Projection must use THIS frame’s camera, even when WebGL renders rarely.
+  camera.updateMatrixWorld(true);scene.updateMatrixWorld(true);anchorCallback();
   if(low&&now-lastRender<1000&&!dirty)return;
   if(low&&now-lastRender<150)return;
   if(mist)mist.rotation.y=Math.sin(t*.02)*.04;

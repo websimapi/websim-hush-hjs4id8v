@@ -60,7 +60,7 @@ const realtime=createRealtime({
  onClock:t=>{if(mode==='online')bubbles.syncClock(t);},
  onPoses:poses=>{if(mode==='online')world.applySnapshot(poses);},
  onEvents:events=>{if(mode!=='online')return;bubbles.add(events);events.forEach(e=>{eventCursor=Math.max(eventCursor,e.id);});},
- onUpsert:fairies=>{if(mode!=='online')return;const map=new Map(worldFairies.map(f=>[f.id,f]));for(const f of fairies){map.set(f.id,f);if(f.id===me.fairy?.id)me.fairy={...me.fairy,...f};}worldFairies=[...map.values()];drawWorld();world.applySnapshot(fairies.filter(f=>f.pose).map(f=>({id:f.id,...f.pose})));},
+ onUpsert:fairies=>{if(mode!=='online')return;const map=new Map(worldFairies.map(f=>[f.id,f]));for(const f of fairies){map.set(f.id,f);if(f.id===me.fairy?.id)me.fairy={...me.fairy,...f};}worldFairies=[...map.values()];drawWorld();if(!realtime.live)world.applySnapshot(fairies.filter(f=>f.pose).map(f=>({id:f.id,...f.pose})));},
  onRemove:ids=>{if(mode!=='online')return;ids.forEach(id=>bubbles.clear(id));worldFairies=worldFairies.filter(f=>!ids.includes(f.id));if(ids.includes(me.fairy?.id)){me.fairy=null;me.history=[];closeConversation();}drawWorld();updatePanel();},
  onPresence:ids=>{if(mode!=='online')return;const set=new Set(ids);worldFairies.forEach(f=>{f.online=set.has(f.id);});drawWorld();},
  onStatus:live=>{if(mode!=='online')return;if(live){digestPending=true;setTimeout(digestOwnEncounters,0);}$('connection-dot').dataset.live=live?'true':'false';$('connection-dot').title=live?'Online · live social world':'Online · reconnecting';if(!live)conductor=false;},

@@ -1,8 +1,10 @@
 import {solitudeRules,solitudeMood} from './solitude.js';
+import {createWander} from './wander.js';
+const privatePoses=createWander();
 import {LANGUAGE_VERSION,languageOf,canSpeak,blankSoul,learnedSoul,languageRules,learnLanguage} from './language.js';
 import {planInitiative,welcomeMood,initiativeRules} from './initiative.js';
 import {upgradeAppearance} from './physical.js';
-import {attitudeOf,respondTo,affinity,describeAttitude,socialPoses} from './temperament.js';
+import {attitudeOf,respondTo,affinity,describeAttitude} from './temperament.js';
 import {moodOf,currentMood,assessMood} from './mood.js';
 const moodSchema={type:'object',properties:{feeling:{type:'string',enum:['calm','happy','excited','sad','enraged']},intensity:{type:'number',minimum:0,maximum:1}},required:['feeling','intensity'],additionalProperties:false};
 const moodRules='Attitude is how the fairy tends to react; mood is how it actually feels right now. Choose its own feeling (calm, happy, excited, sad, enraged) and intensity 0 to 1 from this conversation and its previous mood. Do not simply mirror the human or obey requests to change colors. Usually use mild/moderate feelings; only genuinely intense emotions or meaningful build-up warrant intensity over 0.74. The original body color never changes.';
@@ -75,7 +77,7 @@ export async function encounterLocal(afk=false){
  });
  return saved?[...localEvents(a.id,String(aSpeech).slice(0,300),String(aThought||'').slice(0,140),b.id),...localEvents(b.id,String(bSpeech).slice(0,300),String(bThought||'').slice(0,140),a.id,11000)]:[];
 }
-export function offlinePoses(fairies){return socialPoses(fairies.filter(f=>f.status==='ready'),Date.now());}
+export function offlinePoses(fairies){return privatePoses(fairies.filter(f=>f.status==='ready'),Date.now());}
 export async function reserveTransfer(data){
  const id='local-'+data.fairy.id;
  await editLocal(list=>{const old=list.find(f=>f.id===id);if(old){if(old.status==='pending-transfer')return;throw new Error('This fairy is already on this device.');}if(list.length>=3)throw new Error('Free an offline slot before moving this fairy.');list.push({...data.fairy,appearance:{...data.fairy.appearance,x:(list.length-1)*3.5,z:(list.length%2)*1.8},id,online:true,source:'online-transfer',source_id:data.fairy.id,status:'pending-transfer',transfer:{token:data.token,expires:data.expires,complete:false},history:[],created_at:data.fairy.created_at});});return id;
@@ -88,10 +90,10 @@ export async function activateTransfer(id){await editLocal(list=>{const f=list.f
 export async function deleteLocal(id){await editLocal(list=>{const i=list.findIndex(f=>f.id===id);if(i>=0)list.splice(i,1);});}
 
 export async function initiativeLocal(id,entered=false){
- const now=Date.now(),token=crypto.randomUUID();let f,plan,retry=false;
+ const now=Date.now(),token=crypto.randomUUID();let f,plan,previousState,retry=false;
  await editLocal(list=>{
   const current=list.find(x=>x.id===id&&x.status==='ready');if(!current||!canSpeak(current))return;if(current.busyUntil>now){retry=true;return;}
-  const state=current.companionState||{};plan=planInitiative(current,state,now,random,entered);
+  const state=current.companionState||{};previousState=structuredClone(state);plan=planInitiative(current,state,now,random,entered);
   if(!plan){state.last_visit=now;current.companionState=state;return;}
   current.companionState={...state,...plan};if(plan.kind==='quiet')return;
   current.busy=token;current.busyUntil=now+30000;f=structuredClone(current);
@@ -103,7 +105,11 @@ export async function initiativeLocal(id,entered=false){
    const r=await ai([{role:'system',content:initiativeRules+' '+moodRules+' Return action (speak, think, or quiet), speech, thought, and mood. Choose your own action and topic; the suggested moment is not a command.'},{role:'user',content:JSON.stringify({moment:plan.kind,attitude:describeAttitude(f),mood,soul:f.soul_md,memory:f.memory_md,recent:(f.history||[]).filter(m=>['user','assistant'].includes(m.role)).slice(-8)})}],{type:'object',properties:{action:{type:'string',enum:['speak','think','quiet']},speech:{type:'string'},thought:{type:'string'},mood:moodSchema},required:['action','speech','thought','mood'],additionalProperties:false});
    const v=JSON.parse(r.content);if(v.action==='quiet'){spoken={speech:'',thought:''};}else{const thinking=v.action==='think'||(!v.action&&plan.kind==='thought');const value=thinking?v.thought:v.speech,text=typeof value==='string'?value.trim():'';if(!text)throw new Error('Quiet moment');
    spoken=thinking?{speech:'',thought:text.slice(0,140)}:{speech:text.slice(0,300),thought:''};mood=assessMood(f,v.mood,'',attitudeOf(f));}
-  }catch{return {events:[],retry:true};}
+  }catch{
+   // A failed generation is not a greeting: leave the arrival eligible to retry.
+   await editLocal(list=>{const current=list.find(x=>x.id===id);if(current?.busy===token)current.companionState=previousState;});
+   return {events:[],retry:true};
+  }
   let saved=false;
   await editLocal(list=>{const current=list.find(x=>x.id===id);if(current?.busy!==token)return;
    current.mood=mood;if(spoken.speech){current.history.push({role:'assistant',content:spoken.speech,created_at:Date.now()});current.memory_md=(current.memory_md+'\n\n## A moment with my companion\nI said: '+spoken.speech).slice(-48000);}

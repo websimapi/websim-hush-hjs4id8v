@@ -1,20 +1,13 @@
+import {createSpeechQueue} from './speech-queue.js';
 export function createBubbles(world,host,getFairies){
- const events=new Map(),nodes=new Map(),waiting=new Set();let offset=0,clockSet=false;
+ const queue=createSpeechQueue(),nodes=new Map();let offset=0,clockSet=false;
  function syncClock(t){const sample=t-Date.now();offset=clockSet?offset*.9+sample*.1:sample;clockSet=true;}
- function add(list){for(const e of list){if(!['thought','speech'].includes(e.kind)||typeof e.text!=='string')continue;events.set(String(e.id),e);}}
- function listening(id,value){value?waiting.add(id):waiting.delete(id);}
- function clear(id){for(const [key,e] of events)if(e.fairy_id===id||e.partner_id===id)events.delete(key);nodes.get(id)?.remove();nodes.delete(id);waiting.delete(id);}
+ function add(list){queue.add(list,Date.now()+offset);}
+ function listening(id,value){if(value)queue.pause(id,Date.now()+offset);}
+ function respond(id,list){queue.respond(id,list,Date.now()+offset);}
+ function clear(id){queue.clear(id);nodes.get(id)?.remove();nodes.delete(id);}
  function update(){
-  const now=Date.now()+offset,fairies=new Map(getFairies().map(f=>[f.id,f])),chosen=new Map();
-  for(const [id,e] of events){
-   if(e.expires<=now){events.delete(id);continue;}
-   if(e.at>now)continue;
-   const f=fairies.get(e.fairy_id);
-   if(!f)continue;
-   if(e.audience==='public'&&(!f.online||!fairies.get(e.partner_id)?.online))continue;
-   const old=chosen.get(e.fairy_id);if(!old||e.at>old.at||(e.at===old.at&&e.id>old.id))chosen.set(e.fairy_id,e);
-  }
-  for(const id of waiting)chosen.set(id,{id:'waiting',fairy_id:id,kind:'thought',text:'…'});
+  const fairies=new Map(getFairies().map(f=>[f.id,f])),chosen=queue.current(Date.now()+offset);
   for(const [id,node] of nodes)if(!chosen.has(id)){node.remove();nodes.delete(id);}
   for(const [id,e] of chosen){
    const p=world.project(id,1.12),f=fairies.get(id);let node=nodes.get(id);
@@ -34,5 +27,5 @@ export function createBubbles(world,host,getFairies){
    node.style.setProperty('--tail-shift',Math.max(-100,Math.min(100,p.x-x))+'px');
   }
  }
- return {add,update,listening,clear,syncClock};
+ return {add,update,listening,respond,clear,syncClock};
 }
